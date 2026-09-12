@@ -20,6 +20,15 @@ export const nextCallId = () => `call_${Date.now().toString(36)}_${(callCounter 
 const partsOf = (entry) => array(entry?.parts);
 const textOf = (entry) => partsOf(entry).map((part) => (typeof part?.text === "string" ? part.text : "")).join("");
 const callsOf = (entry) => partsOf(entry).filter((part) => part?.functionCall && typeof part.functionCall === "object").map((part) => part.functionCall);
+// Gemini 3 signs each function call it makes (a `thoughtSignature` beside the
+// call in the part) and refuses the next request unless the signature comes
+// back on the same part. Carried on the call and on the stored part; the
+// other providers never see it.
+const signatureOf = (part) => (typeof part?.thoughtSignature === "string" && part.thoughtSignature
+  ? { thoughtSignature: part.thoughtSignature }
+  : typeof part?.thought_signature === "string" && part.thought_signature
+    ? { thoughtSignature: part.thought_signature }
+    : {});
 const responsesOf = (entry) => partsOf(entry).filter((part) => part?.functionResponse && typeof part.functionResponse === "object").map((part) => part.functionResponse);
 
 const serialise = (value) => {
@@ -35,7 +44,7 @@ export const geminiContentsFromHistory = (history) => array(history).map((entry)
   parts: partsOf(entry).map((part) => {
     if (part?.functionCall) {
       const { name, args } = part.functionCall;
-      return { functionCall: { name: clean(name), args: args && typeof args === "object" ? args : {} } };
+      return { functionCall: { name: clean(name), args: args && typeof args === "object" ? args : {} }, ...signatureOf(part) };
     }
     if (part?.functionResponse) {
       const { name, response } = part.functionResponse;
@@ -48,9 +57,13 @@ export const geminiContentsFromHistory = (history) => array(history).map((entry)
 export const lookupCallsFromGemini = (data, outputToolName) => {
   const parts = array(data?.candidates?.[0]?.content?.parts);
   return parts
-    .map((part) => part?.functionCall)
-    .filter((call) => call && clean(call.name) && clean(call.name) !== clean(outputToolName))
-    .map((call) => ({ id: nextCallId(), name: clean(call.name), args: call.args && typeof call.args === "object" ? call.args : {} }));
+    .filter((part) => part?.functionCall && clean(part.functionCall.name) && clean(part.functionCall.name) !== clean(outputToolName))
+    .map((part) => ({
+      id: nextCallId(),
+      name: clean(part.functionCall.name),
+      args: part.functionCall.args && typeof part.functionCall.args === "object" ? part.functionCall.args : {},
+      ...signatureOf(part),
+    }));
 };
 
 // ---- OpenAI-compatible ----------------------------------------------------
@@ -128,7 +141,7 @@ export const appendLookupRound = (history, calls, results) => {
   const byId = new Map(array(results).map((result) => [clean(result.id), result]));
   return [
     ...array(history),
-    { role: "model", parts: array(calls).map((call) => ({ functionCall: { id: clean(call.id), name: clean(call.name), args: call.args ?? {} } })) },
+    { role: "model", parts: array(calls).map((call) => ({ functionCall: { id: clean(call.id), name: clean(call.name), args: call.args ?? {} }, ...signatureOf(call) })) },
     {
       role: "user",
       parts: array(calls).map((call) => {
@@ -141,3 +154,17 @@ export const appendLookupRound = (history, calls, results) => {
 
 // How much of a history is lookup traffic, for logs.
 export const lookupRoundCount = (history) => array(history).filter((entry) => callsOf(entry).length > 0).length;
+
+// One line for a call, the way a log reads it: name(key="value", n=3). Long
+// strings are cut so a list of calls stays a list and not a transcript.
+const argValue = (value, max) => {
+  if (typeof value === "string") return JSON.stringify(value.length > max ? `${value.slice(0, max)}…` : value);
+  if (value == null || typeof value === "number" || typeof value === "boolean") return String(value);
+  const text = serialise(value);
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
+export const describeLookupCall = (call, { maxValue = 60 } = {}) => {
+  const args = call?.args && typeof call.args === "object" && !Array.isArray(call.args) ? call.args : {};
+  const inner = Object.entries(args).map(([key, value]) => `${key}=${argValue(value, maxValue)}`).join(", ");
+  return `${clean(call?.name) || "?"}(${inner})`;
+};
