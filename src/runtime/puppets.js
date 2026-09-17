@@ -89,6 +89,11 @@ const viewOf = (row, viewer) => {
   const loyaltyNumber = Number(row?.loyalty);
   const loyalty = isOverlord && Number.isFinite(loyaltyNumber) ? Math.max(0, Math.min(100, Math.round(loyaltyNumber))) : null;
 
+  // These fall back rather than trusting normalizeWorldState, and that is not
+  // redundant: the advisor path reads world.json RAW (readJson, not
+  // readWorldState), so this module is handed unnormalised rows in production.
+  // Being import-free, it cannot call the normalizer to find out.
+  //
   // The believed state. A party to the arrangement knows what it did, and an
   // open arrangement ends in public — but a covert one learned through
   // intelligence goes on standing in the viewer's mind until fresh reporting
@@ -133,3 +138,13 @@ export const puppetsOf = (world, viewer) =>
 
 export const overlordOf = (world, viewer) =>
   livePuppetsFor(world, viewer).find((row) => row.role === "puppet")?.overlord || "";
+
+// The three-way branch — are we the Overlord here, the Puppet, or looking at
+// somebody else's arrangement — was being rewritten at every surface, and a
+// fourth would have written it again. The WORDS differ (a prompt line, a panel
+// headline, a list marker), so only the dispatch is shared.
+export const describeRole = (row, { overlord, puppet, foreign }) => {
+  if (row?.role === "overlord") return overlord?.(row);
+  if (row?.role === "puppet") return puppet?.(row);
+  return foreign?.(row);
+};

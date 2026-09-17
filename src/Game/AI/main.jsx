@@ -2904,7 +2904,7 @@ export async function sendDiplomaticMessage(playerMessage, speakingAs, countries
 
     try {
         const raw = await callAI(freshPrompt, historyWithInstruction, { ...opts, languageMode: "chat", logLabel: `diplomacy → ${speakingAs}`, taskKey: "diplomacy" });
-        const { reply, reaction, memorySummary: generatedMemorySummary } = parseDiplomaticEnvelope(raw);
+        const { reply, reaction, memorySummary: generatedMemorySummary, refusedOverlord } = parseDiplomaticEnvelope(raw);
         // A reply that dropped the memory line keeps the last one; the
         // thread never forgets what it knew because one answer was terse.
         const memorySummary = generatedMemorySummary || diplomaticMemorySummary;
@@ -2921,7 +2921,9 @@ export async function sendDiplomaticMessage(playerMessage, speakingAs, countries
             { reply, rawChars: String(raw ?? "").length, reaction: reaction || "(none)" },
             { verbose: true });
         diplomaticHistory.push({ role: "model", parts: [{ text: `[${speakingAs}]: ${reply}` }] });
-        return { reply, reaction, memorySummary };
+        // Carried out to the caller so it lands on the SAVED message: the turn
+        // reads refusals back off the transcript, which cannot race a world write.
+        return { reply, reaction, memorySummary, refusedOverlord };
     } catch (err) {
         diplomaticHistory.pop();
         logDebugEvent("diplomacy", `${speakingAs} failed to reply after ${elapsedSeconds(startedAt)} — the message was rolled back off the history.`, err);

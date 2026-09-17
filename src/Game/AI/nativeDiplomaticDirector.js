@@ -11,6 +11,7 @@
 // diplomatic facts; any one AI request sees only the relevant slice.
 
 import { normalizeEvents, normalizeWorldState } from "../../runtime/gameState.js";
+import { MAX_PUPPETS, PUPPET_KINDS } from "../../runtime/puppets.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
 import { resolvePolityIdentity } from "../../runtime/polityIdentity.js";
 import { compareGameDates, isGameDate } from "../../runtime/gameDates.js";
@@ -1312,12 +1313,12 @@ export const applyAgreementUpdates = ({ world, updates, events = [], stopDate = 
 // about what is changing. `reclassify` says it plainly instead.
 // ---------------------------------------------------------------------------
 
-export const PUPPET_OP_VALUES = Object.freeze([
-  "install", "reclassify", "loyalty", "reveal", "release", "annex", "revolt",
+const PUPPET_OP_VALUES = Object.freeze([
+  "install", "reclassify", "loyalty", "reveal", "release", "annex", "revolt", "suppress",
 ]);
 const PUPPET_OP_SET = new Set(PUPPET_OP_VALUES);
 const PUPPET_ENDING_OPS = new Set(["release", "annex", "revolt"]);
-const PUPPET_KIND_SET = new Set(["protectorate", "satellite", "client"]);
+const PUPPET_KIND_SET = new Set(PUPPET_KINDS);
 const MAX_PUPPET_UPDATES_PER_PASS = 24;
 // How many subordinations the bounded prompt slice may carry. Its own bound:
 // borrowing the agreements cap made the number lie about what it limited.
@@ -1335,6 +1336,19 @@ export const REFUSED_DEMAND_LOYALTY_COST = 10;
 // score is forced down rather than nudged, because a satellite that has just
 // thrown off its Overlord is not "strained".
 const REVOLT_RELATION_SCORE = -60;
+
+// A coup that FAILED. The Overlord held on, so loyalty is forced up — obedience
+// bought at gunpoint, not affection — and the prompt asks for the reputation
+// drop that watching a government crush its client's rising costs you. Without
+// this verb low Loyalty is a countdown the player can only watch; with it, a
+// brewing revolt is a crisis they can answer, badly and at a price.
+const SUPPRESSED_COUP_LOYALTY_GAIN = 25;
+
+// Below this, resentment is a situation rather than a mood, and the world
+// director is given something to ripen. Not a trigger: the Storyline decides
+// WHEN, and may decide never.
+const COUP_STORYLINE_LOYALTY = 35;
+export const puppetCoupStorylineId = (row) => `storyline-puppet-${lower(row?.puppet).replace(/[^a-z0-9]+/g, "-")}`;
 
 const decodePuppetLine = (line, index) => {
   const text = String(line ?? "");
@@ -1391,24 +1405,33 @@ const livePuppetByPuppet = (rows, puppet) => rows.find((row) =>
   row.status === "active" && lower(row.puppet) === lower(puppet));
 
 // A revolt leaves the two at each other's throats and voids what they had
-// signed. Written straight onto the ledgers rather than round-tripped as
-// relation/agreement lines, because the model did not ask for this — it falls
-// out of the revolt, and a line the model never wrote cannot bind to an event.
-const applyRevoltFallout = (world, overlord, puppet, date, round) => {
-  const key = relationPairKey(overlord, puppet, world);
-  const relations = array(world.relations).map((relation) =>
-    relationPairKey(relation.a, relation.b, world) === key
-      ? {
-        ...relation,
-        score: Math.min(Number(relation.score) || 0, REVOLT_RELATION_SCORE),
-        status: normalizeRelationStatus("", Math.min(Number(relation.score) || 0, REVOLT_RELATION_SCORE)),
-        lastUpdatedDate: date || clean(relation.lastUpdatedDate),
-        updatedRound: Math.max(0, Math.trunc(Number(round) || 0)),
-      }
-      : relation);
+// signed. The relation goes through applyRelationUpdates — the ORDINARY path,
+// bound to the revolt's own event — rather than being written onto the ledger
+// behind its back, so a thrown-off satellite reads in history exactly like any
+// other collapse in relations.
+const applyRevoltFallout = (world, overlord, puppet, causalEventIds, events, date, round) => {
+  const score = REVOLT_RELATION_SCORE;
+  const merged = applyRelationUpdates({
+    world,
+    updates: [{
+      id: `relation-revolt-${lower(puppet).replace(/[^a-z0-9]+/g, "-")}`,
+      a: overlord,
+      b: puppet,
+      score,
+      status: normalizeRelationStatus("", score),
+      eventIds: causalEventIds,
+      summary: `${puppet} threw off ${overlord}.`,
+    }],
+    events,
+    stopDate: date,
+    round,
+    // The revolt's event is already bound; this keeps the merge from refusing
+    // the line when the caller is replaying a baseline turn.
+    allowUnboundBaseline: true,
+  });
 
   const both = [lower(overlord), lower(puppet)];
-  const agreements = array(world.agreements).map((agreement) => {
+  const agreements = array(merged.world.agreements).map((agreement) => {
     const parties = array(agreement.parties).map(lower);
     const between = both.every((name) => parties.includes(name));
     if (!between || ["ended", "expired"].includes(lower(agreement.status))) return agreement;
@@ -1421,7 +1444,7 @@ const applyRevoltFallout = (world, overlord, puppet, date, round) => {
     };
   });
 
-  return { ...world, relations, agreements };
+  return { ...merged.world, agreements };
 };
 
 export const applyPuppetUpdates = ({
@@ -1558,13 +1581,16 @@ export const applyPuppetUpdates = ({
     if (update.op === "reclassify" && PUPPET_KIND_SET.has(update.kind)) patch.kind = update.kind;
     if (update.op === "loyalty" && update.loyalty !== null) patch.loyalty = update.loyalty;
     if (update.op === "reveal") patch.secrecy = "open";
+    if (update.op === "suppress") {
+      patch.loyalty = clamp(Math.round(Number(existing.loyalty) || 0) + SUPPRESSED_COUP_LOYALTY_GAIN, 0, 100);
+    }
     if (PUPPET_ENDING_OPS.has(update.op)) {
       patch.status = update.op === "release" ? "released" : update.op === "annex" ? "annexed" : "revolted";
       patch.endedDate = date || existing.lastUpdatedDate;
     }
 
     rows = rows.map((row) => row === existing ? { ...row, ...patch } : row);
-    if (update.op === "revolt") nextWorld = applyRevoltFallout(nextWorld, overlord, puppet, date, round);
+    if (update.op === "revolt") nextWorld = applyRevoltFallout(nextWorld, overlord, puppet, eventIds, events, date, round);
     applied.push(existing.id);
   }
 
@@ -1591,7 +1617,33 @@ export const applyPuppetUpdates = ({
   // install is pushed to the end — so a full ledger would silently swallow the
   // subordination this very turn created.
   const merged = normalizeWorldState({ ...nextWorld, puppets: rows });
-  return { world: merged, puppets: merged.puppets, appliedIds: applied, refusedDemandCount };
+
+  // A Puppet whose Loyalty has fallen far enough gets a hidden Storyline, once,
+  // and the world director ripens it from there like any other ongoing
+  // situation. The ENGINE opens it rather than the model, for the same reason
+  // the refused demand is an engine rule: a turn that forgot to open one would
+  // mean a decade of mistreatment silently never happened. What it never does is
+  // fire the coup — pressure and momentum decide that, and may decide never.
+  const existingStorylineIds = new Set(array(merged.storylines).map((entry) => lower(entry?.id)));
+  const storylineSeeds = array(merged.puppets)
+    .filter((row) => row.status === "active" && Number(row.loyalty) < COUP_STORYLINE_LOYALTY)
+    .filter((row) => !existingStorylineIds.has(lower(puppetCoupStorylineId(row))))
+    .map((row) => {
+      const pressure = clamp(Math.round(100 - (Number(row.loyalty) || 0) * 2), 20, 100);
+      return [
+        puppetCoupStorylineId(row),
+        "active",
+        String(pressure),
+        "35",
+        row.lastUpdatedDate || "",
+        "unrest",
+        `Resentment in ${row.puppet}`,
+        `${row.puppet},${row.overlord}`,
+        "",
+        `${row.puppet} chafes under ${row.overlord}. Whether this ripens into a coup, a negotiated loosening or nothing at all is unsettled.`,
+      ].join(SEP);
+    });
+  return { world: merged, puppets: merged.puppets, appliedIds: applied, refusedDemandCount, storylineSeeds };
 };
 
 export const applyDiplomaticUpdates = ({
@@ -1641,6 +1693,7 @@ export const applyDiplomaticUpdates = ({
     appliedAgreementIds: agreementMerge.appliedIds,
     appliedPuppetIds: puppetMerge.appliedIds,
     refusedDemandCount: puppetMerge.refusedDemandCount,
+    puppetStorylineSeeds: puppetMerge.storylineSeeds,
   };
 };
 

@@ -237,3 +237,53 @@ test("a full ledger evicts what is over, never the install that just arrived", (
   assert.equal(live.length, 1, "the new subordination survives a full ledger");
   assert.equal(live[0].puppet, "Poland");
 });
+
+test("a suppressed coup forces Loyalty up rather than ending the arrangement", () => {
+  const world = {
+    ...baseWorld,
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 10, secrecy: "open", status: "active" }],
+  };
+  const { world: next } = apply(world, "suppress~USSR~Poland~~~~1~The rising is put down");
+  assert.equal(next.puppets[0].status, "active", "the Overlord held on");
+  assert.equal(next.puppets[0].loyalty, 35, "obedience at gunpoint, not affection");
+});
+
+test("a Puppet whose Loyalty has collapsed is handed a hidden Storyline, once", () => {
+  const world = {
+    ...baseWorld,
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 12, secrecy: "open", status: "active" }],
+  };
+  const merge = apply(world, "loyalty~USSR~Poland~~12~~1~Grain requisitions bite");
+  assert.equal(merge.storylineSeeds.length, 1);
+  assert.match(merge.storylineSeeds[0], /^storyline-puppet-poland~active~/);
+  assert.match(merge.storylineSeeds[0], /Poland,USSR/);
+
+  const already = applyPuppetUpdates({
+    world: {
+      ...merge.world,
+      storylines: [{
+        id: "storyline-puppet-poland",
+        kind: "unrest",
+        title: "Resentment in Poland",
+        status: "active",
+        pressure: 76,
+        momentum: 35,
+        startedDate: "1945-06-28",
+        state: "Poland chafes under the USSR.",
+        participants: ["Poland", "USSR"],
+      }],
+    },
+    updates: "loyalty~USSR~Poland~~11~~1~Worse",
+    events: events(),
+    round: 2,
+  });
+  assert.deepEqual(already.storylineSeeds, [], "never opened twice");
+});
+
+test("a contented Puppet gets no Storyline", () => {
+  const world = {
+    ...baseWorld,
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 80, secrecy: "open", status: "active" }],
+  };
+  assert.deepEqual(apply(world, "loyalty~USSR~Poland~~80~~1~Calm").storylineSeeds, []);
+});

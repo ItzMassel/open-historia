@@ -24,13 +24,31 @@ export const parseDiplomaticEnvelope = (raw) => {
     text = text.slice(0, reactionMatch.index).trimEnd();
   }
 
+  // REFUSED_DEMAND names the Overlord whose demand this speaker has just turned
+  // down. It is what makes the one deterministic Loyalty rule possible: a demand
+  // is negotiable text, so without a signal the engine has no way to know a
+  // refusal happened, and the cost would depend on the model remembering to
+  // score it - which is the very thing the rule exists to escape.
+  //
+  // Hidden metadata like the two beside it, and stripped the same way: it must
+  // never reach the chat bubble.
+  let refusedOverlord = "";
+  // Matched as its OWN LINE anywhere in the output rather than anchored to the
+  // end, because the three hidden lines are stripped in a fixed order and a
+  // model that reorders them would otherwise fold this one into the memory.
+  const refusalMatch = text.match(/^[ \t]*REFUSED_DEMAND[ \t]*:[ \t]*(.+)$/im);
+  if (refusalMatch) {
+    refusedOverlord = clean(refusalMatch[1]);
+    text = (text.slice(0, refusalMatch.index) + text.slice(refusalMatch.index + refusalMatch[0].length)).trim();
+  }
+
   const memoryMatch = text.match(/\n?\s*DIPLOMATIC_MEMORY\s*:\s*([\s\S]+)$/i);
   if (memoryMatch) {
     memorySummary = memoryMatch[1].replace(/\s+/g, " ").trim();
     text = text.slice(0, memoryMatch.index).trimEnd();
   }
 
-  return { reply: text, reaction, memorySummary };
+  return { reply: text, reaction, memorySummary, refusedOverlord };
 };
 
 // The newest durable memory a saved transcript carries, with the game date of

@@ -726,13 +726,18 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             setIsLoading(true);
             setSpeakingCountry(country);
             try {
-                const { reply, reaction, memorySummary } = await sendDiplomaticMessage(playerMessage, country.name, countries);
+                const { reply, reaction, memorySummary, refusedOverlord } = await sendDiplomaticMessage(playerMessage, country.name, countries);
                 // The thread's rolling durable memory rides on the reply that
                 // produced it, so a reopened thread, the advisor's one-off sends
                 // and the world director read the same continuity.
                 const leaderMessage = {
                     role: "leader", speaker: country.name, code: country.code, text: reply, time: gameDate,
                     ...(memorySummary ? { memorySummary } : {}),
+                    // A Puppet that just refused its Overlord. Stamped on the
+                    // message rather than written to the world here: the next
+                    // jump reads it back off the transcript, so the deterministic
+                    // Loyalty cost cannot race the turn's own world write.
+                    ...(refusedOverlord ? { refusedOverlord } : {}),
                 };
 
                 if (reaction) {

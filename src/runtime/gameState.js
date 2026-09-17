@@ -3284,10 +3284,15 @@ const normalizeWorldPuppets = (value, identityWorld) => {
   // Evict what is OVER before what is live, oldest first — never a live row.
   // .slice() would drop whatever happened to be last, which is live work as
   // often as not (the same rule the projects board uses).
-  const live = rows.filter((row) => row.status === "active");
-  const ended = rows.filter((row) => row.status !== "active")
-    .sort((a, b) => compareGameDates(b.lastUpdatedDate || "", a.lastUpdatedDate || "") || a.id.localeCompare(b.id));
-  return [...live, ...ended.slice(0, Math.max(0, MAX_WORLD_PUPPETS - live.length))].slice(0, MAX_WORLD_PUPPETS);
+  const byRecency = (a, b) => compareGameDates(b.lastUpdatedDate || "", a.lastUpdatedDate || "") || a.id.localeCompare(b.id);
+  const live = rows.filter((row) => row.status === "active").sort(byRecency);
+  const ended = rows.filter((row) => row.status !== "active").sort(byRecency);
+  // Past 64 LIVE subordinations something has to give, and a trailing .slice()
+  // would cut whichever happened to be last rather than whichever matters least.
+  // Sorted first, so the survivor set is the most recently touched either way.
+  return [...live, ...ended].slice(0, MAX_WORLD_PUPPETS).length === MAX_WORLD_PUPPETS && live.length >= MAX_WORLD_PUPPETS
+    ? live.slice(0, MAX_WORLD_PUPPETS)
+    : [...live, ...ended.slice(0, Math.max(0, MAX_WORLD_PUPPETS - live.length))];
 };
 
 export const normalizeWorldState = (world) => {
