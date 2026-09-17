@@ -98,6 +98,20 @@ _Avoid_: Quota exceeded (for a short-window limit)
 A Fallback entry that failed in a way waiting cannot fix, such as a rejected key or a model the provider does not know. It is skipped until the player edits it, and it shows the player what went wrong.
 _Avoid_: Broken, Spent (for this case)
 
+### Subordination
+
+**Puppet**:
+A polity whose foreign or domestic will is directed by another. It remains a separate country throughout: it holds its own territory, keeps its own sovereignty, and paints in its own colour. A Puppet is never a region-level fact.
+_Avoid_: Vassal, satellite state, client state, subject (as the term for the record)
+
+**Overlord**:
+The polity directing a Puppet. One Puppet has at most one Overlord; one Overlord may hold many.
+_Avoid_: Suzerain, master, patron, parent
+
+**Loyalty**:
+How far a Puppet accepts its Overlord's direction, 0-100. Always hidden, even where the subordination itself is open knowledge, and shown to the player only as a band.
+_Avoid_: Obedience, compliance, satisfaction, stability
+
 ---
 
 ## 1. Storage model: the runtime JSON assets
