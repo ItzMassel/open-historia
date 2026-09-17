@@ -1554,7 +1554,6 @@ export const buildWorldSummary = async (bundle, regionCatalog = null, { regionLi
       + (taggedCodes.length > 40 ? `\n(+${taggedCodes.length - 40} more tagged countries not listed)` : "");
   const playerTags = resolveCountryTags(baseTags, world, bundle.game.country);
 
-
   // The region vocabulary the jump prompt promises ("every ... region ... separated
   // by a comma ... ANALYZE THIS INCREDIBLY CAREFULLY"). Until now nothing filled it,
   // so on a stock map the model saw ZERO region names and invented ones that then

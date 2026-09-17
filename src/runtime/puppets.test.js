@@ -139,3 +139,19 @@ test("Loyalty bands run Loyal, Content, Restless, Seething", () => {
   assert.equal(loyaltyBand(24), "Seething");
   assert.equal(loyaltyBand(0), "Seething");
 });
+
+test("an Overlord row whose Loyalty is missing still gets a word, not a crash", () => {
+  // Callers interpolate the band straight into prose, and the advisor reads
+  // world.json raw — so a row that never got a loyalty must not hand back null.
+  const raw = { overlord: "USSR", puppet: "Poland", secrecy: "open", status: "active" };
+  const [row] = visiblePuppetsFor(world([raw]), "USSR");
+  assert.equal(typeof row.loyaltyBand, "string");
+  assert.doesNotThrow(() => row.loyaltyBand.toLowerCase());
+});
+
+test("a band is still withheld from everyone but the Overlord", () => {
+  const raw = { overlord: "USSR", puppet: "Poland", secrecy: "open", status: "active" };
+  for (const viewer of ["Poland", "France"]) {
+    assert.equal(visiblePuppetsFor(world([raw]), viewer)[0].loyaltyBand, null);
+  }
+});

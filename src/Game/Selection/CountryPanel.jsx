@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { getNationFlags, getNationTags, loadRegionCatalog } from "../../runtime/assets.js";
 import { resolveCountryTags } from "../../runtime/countryTags.js";
 import { readEventsState, readGameData, readWorldState } from "../../runtime/gameState.js";
-import { visiblePuppetsFor } from "../../runtime/puppets.js";
+import { describeRole, visiblePuppetsFor } from "../../runtime/puppets.js";
 import { requestDiplomaticChat } from "../GameUI/chat.jsx";
 import GameFlagPicker from "../GameUI/GameFlagPicker.jsx";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
@@ -217,27 +217,25 @@ const CountryInfoPanel = () => {
         const asOf = row.asOf ? `, as of ${row.asOf}` : "";
         const provenance = row.fromIntelligence ? `From intelligence${asOf}.` : "";
 
-        if (row.puppet === name && row.role === "overlord") {
-            return {
+        return describeRole(row, {
+            overlord: () => ({
                 headline: `Our ${row.kind}`,
                 // A band, never a number: a visible score is a threshold to
                 // optimise against, and nothing in the engine enforces one.
                 detail: `${row.loyaltyBand} toward us${row.startedDate ? ` · since ${row.startedDate}` : ""} · ${row.secrecy === "covert" ? "arrangement is covert" : "openly known"}`,
                 provenance: "",
-            };
-        }
-        if (row.role === "puppet") {
-            return {
-                headline: `Our overlord`,
+            }),
+            puppet: () => ({
+                headline: "Our overlord",
                 detail: `We are the ${row.kind} of ${row.overlord}${row.startedDate ? ` · since ${row.startedDate}` : ""}`,
                 provenance: "",
-            };
-        }
-        return {
-            headline: `${row.kind.charAt(0).toUpperCase()}${row.kind.slice(1)} of ${row.overlord}`,
-            detail: `${row.overlord} directs this country's affairs.`,
-            provenance,
-        };
+            }),
+            foreign: () => ({
+                headline: `${row.kind.charAt(0).toUpperCase()}${row.kind.slice(1)} of ${row.overlord}`,
+                detail: `${row.overlord} directs this country's affairs.`,
+                provenance,
+            }),
+        });
     }, [worldState, playerCountry, displayName, country]);
 
     const filteredEvents = useMemo(() => {

@@ -15,7 +15,7 @@ import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
-import { livePuppetsFor } from "../../runtime/puppets.js";
+import { describeRole, livePuppetsFor } from "../../runtime/puppets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import {
   buildDiplomaticTurnInstruction,
@@ -2628,10 +2628,11 @@ ${projectsSummary}`;
 const buildAdvisorPuppetsDirective = (world, playerCountry) => {
     const rows = livePuppetsFor(world, playerCountry);
     const lines = rows.slice(0, 40).map((row) => {
-        const who = row.role === "overlord"
-            ? `${row.puppet} is OUR ${row.kind} (loyalty: ${row.loyaltyBand.toLowerCase()})`
-            : row.role === "puppet" ? `WE are the ${row.kind} of ${row.overlord}`
-                : `${row.overlord} directs ${row.puppet} (${row.kind})`;
+        const who = describeRole(row, {
+            overlord: () => `${row.puppet} is OUR ${row.kind} (loyalty: ${row.loyaltyBand.toLowerCase()})`,
+            puppet: () => `WE are the ${row.kind} of ${row.overlord}`,
+            foreign: () => `${row.overlord} directs ${row.puppet} (${row.kind})`,
+        });
         const source = row.fromIntelligence ? ` — from intelligence${row.asOf ? `, as of ${row.asOf}` : ""}` : "";
         return `- ${who}${source}`;
     });

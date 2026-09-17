@@ -285,10 +285,6 @@ const WORLD_STORYLINE_STATUS_SET = new Set(["active", "dormant", "resolved"]);
 const MAX_WORLD_STORYLINES = 96;
 const MAX_WORLD_RELATIONS = 256;
 const MAX_WORLD_AGREEMENTS = 128;
-// Sized like the agreements ledger and for the same reason: every row rides the
-// simulator, advisor and chat prompts every turn. Ended rows are kept below the
-// cap on purpose — stale foreign knowledge depends on them surviving.
-
 
 const normalizeTextLike = (value) => {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -537,6 +533,7 @@ const normalizeChatMessage = (message, index = 0) => {
       text,
       time: "",
       memorySummary: "",
+      refusedOverlord: "",
     };
   }
 
@@ -559,6 +556,13 @@ const normalizeChatMessage = (message, index = 0) => {
     // chat text, it lets long negotiations stay bounded without forgetting
     // agreements, threats or unresolved proposals (promptContext reads the latest).
     memorySummary: normalizeOptionalString(message.memorySummary || message.diplomaticMemorySummary),
+    // The Overlord whose demand this speaker refused, off the reply's hidden
+    // REFUSED_DEMAND line (diplomaticEnvelope.js). It has to survive the round
+    // trip: the next jump reads refusals back off the SAVED transcript to charge
+    // the one deterministic Loyalty cost, and a field this normalizer does not
+    // know is a field the next write silently drops — which is exactly how that
+    // rule spent two commits looking wired up while never once firing.
+    refusedOverlord: normalizeOptionalString(message.refusedOverlord),
     text,
     time: normalizeOptionalString(message.time || message.date),
   };
@@ -3284,15 +3288,15 @@ const normalizeWorldPuppets = (value, identityWorld) => {
   // Evict what is OVER before what is live, oldest first — never a live row.
   // .slice() would drop whatever happened to be last, which is live work as
   // often as not (the same rule the projects board uses).
+  // Live rows first, so the cut below can only ever reach finished ones while any
+  // remain — that is the whole eviction rule. Each half is ordered by how
+  // recently it was touched, so past 64 LIVE subordinations, where something must
+  // give whatever we do, what goes is the least recently touched rather than
+  // whichever happened to be last in the array.
   const byRecency = (a, b) => compareGameDates(b.lastUpdatedDate || "", a.lastUpdatedDate || "") || a.id.localeCompare(b.id);
   const live = rows.filter((row) => row.status === "active").sort(byRecency);
   const ended = rows.filter((row) => row.status !== "active").sort(byRecency);
-  // Past 64 LIVE subordinations something has to give, and a trailing .slice()
-  // would cut whichever happened to be last rather than whichever matters least.
-  // Sorted first, so the survivor set is the most recently touched either way.
-  return [...live, ...ended].slice(0, MAX_WORLD_PUPPETS).length === MAX_WORLD_PUPPETS && live.length >= MAX_WORLD_PUPPETS
-    ? live.slice(0, MAX_WORLD_PUPPETS)
-    : [...live, ...ended.slice(0, Math.max(0, MAX_WORLD_PUPPETS - live.length))];
+  return [...live, ...ended].slice(0, MAX_WORLD_PUPPETS);
 };
 
 export const normalizeWorldState = (world) => {

@@ -112,7 +112,11 @@ const viewOf = (row, viewer) => {
     endedDate: learned ? "" : str(row?.endedDate),
     role,
     loyalty,
-    loyaltyBand: loyalty === null ? null : loyaltyBand(loyalty),
+    // Null for everyone but the Overlord — and callers interpolate this straight
+    // into prose, so an Overlord row whose loyalty is missing or garbage must
+    // still get a WORD. loyaltyBand() already answers "Content" for a
+    // non-finite score; the null here means "not yours to see", never "unknown".
+    loyaltyBand: role === "overlord" ? loyaltyBand(loyalty) : null,
     fromIntelligence: Boolean(learned),
     asOf: learned ? learned.learnedDate : "",
   };
@@ -130,14 +134,6 @@ export const visiblePuppetsFor = (world, viewer) => {
 // stale covert row is not the same thing as the arrangements that are.
 export const livePuppetsFor = (world, viewer) =>
   visiblePuppetsFor(world, viewer).filter((row) => row.status === "active");
-
-// The viewer's own sphere, and the Overlord over them, for the surfaces that
-// only ever care about those two questions.
-export const puppetsOf = (world, viewer) =>
-  livePuppetsFor(world, viewer).filter((row) => row.role === "overlord");
-
-export const overlordOf = (world, viewer) =>
-  livePuppetsFor(world, viewer).find((row) => row.role === "puppet")?.overlord || "";
 
 // The three-way branch — are we the Overlord here, the Puppet, or looking at
 // somebody else's arrangement — was being rewritten at every surface, and a

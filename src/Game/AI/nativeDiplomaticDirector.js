@@ -1348,7 +1348,7 @@ const SUPPRESSED_COUP_LOYALTY_GAIN = 25;
 // director is given something to ripen. Not a trigger: the Storyline decides
 // WHEN, and may decide never.
 const COUP_STORYLINE_LOYALTY = 35;
-export const puppetCoupStorylineId = (row) => `storyline-puppet-${lower(row?.puppet).replace(/[^a-z0-9]+/g, "-")}`;
+export const puppetCoupStorylineId = (row) => `storyline-puppet-${slug(row?.puppet)}`;
 
 const decodePuppetLine = (line, index) => {
   const text = String(line ?? "");
@@ -1414,7 +1414,7 @@ const applyRevoltFallout = (world, overlord, puppet, causalEventIds, events, dat
   const merged = applyRelationUpdates({
     world,
     updates: [{
-      id: `relation-revolt-${lower(puppet).replace(/[^a-z0-9]+/g, "-")}`,
+      id: `relation-revolt-${slug(puppet)}`,
       a: overlord,
       b: puppet,
       score,
@@ -1460,6 +1460,7 @@ export const applyPuppetUpdates = ({
   let rows = array(nextWorld.puppets).map((row) => ({ ...row }));
   const decoded = bindPuppetUpdatesToEvents(updates, events);
   const applied = [];
+  const settledStorylines = new Set();
 
   for (const update of decoded) {
     if (!PUPPET_OP_SET.has(update.op)) {
@@ -1542,7 +1543,7 @@ export const applyPuppetUpdates = ({
 
       const secrecy = update.secrecy === "covert" ? "covert" : "open";
       rows.push({
-        id: `puppet-${lower(overlord).replace(/[^a-z0-9]+/g, "-")}-${lower(puppet).replace(/[^a-z0-9]+/g, "-")}-${rows.length}`,
+        id: `puppet-${slug(overlord)}-${slug(puppet)}-${rows.length}`,
         overlord,
         puppet,
         kind: PUPPET_KIND_SET.has(update.kind) ? update.kind : "client",
@@ -1590,6 +1591,11 @@ export const applyPuppetUpdates = ({
     }
 
     rows = rows.map((row) => row === existing ? { ...row, ...patch } : row);
+    // The resentment played out, one way or another: it revolted, it was put
+    // down, or the arrangement it was about is over. Either way the Storyline
+    // has nothing left to ripen, and leaving it active would also block the
+    // seeder from ever opening a fresh one for the next arrangement.
+    if (PUPPET_ENDING_OPS.has(update.op) || update.op === "suppress") settledStorylines.add(puppetCoupStorylineId(existing));
     if (update.op === "revolt") nextWorld = applyRevoltFallout(nextWorld, overlord, puppet, eventIds, events, date, round);
     applied.push(existing.id);
   }
@@ -1625,9 +1631,20 @@ export const applyPuppetUpdates = ({
   // mean a decade of mistreatment silently never happened. What it never does is
   // fire the coup — pressure and momentum decide that, and may decide never.
   const existingStorylineIds = new Set(array(merged.storylines).map((entry) => lower(entry?.id)));
+  const liveStorylineIds = new Set(array(merged.storylines)
+    .filter((entry) => lower(entry?.status) !== "resolved")
+    .map((entry) => lower(entry?.id)));
+
+  // Closing lines first, so a Puppet that revolted and whose Storyline is now
+  // settled cannot also be re-seeded by the pass that follows.
+  const storylineResolutions = [...settledStorylines]
+    .filter((id) => liveStorylineIds.has(lower(id)))
+    .map((id) => [id, "resolved", "0", "0", "", "", "", "", "", "It played out."].join(SEP));
+
   const storylineSeeds = array(merged.puppets)
     .filter((row) => row.status === "active" && Number(row.loyalty) < COUP_STORYLINE_LOYALTY)
     .filter((row) => !existingStorylineIds.has(lower(puppetCoupStorylineId(row))))
+    .filter((row) => !settledStorylines.has(puppetCoupStorylineId(row)))
     .map((row) => {
       const pressure = clamp(Math.round(100 - (Number(row.loyalty) || 0) * 2), 20, 100);
       return [
@@ -1643,7 +1660,7 @@ export const applyPuppetUpdates = ({
         `${row.puppet} chafes under ${row.overlord}. Whether this ripens into a coup, a negotiated loosening or nothing at all is unsettled.`,
       ].join(SEP);
     });
-  return { world: merged, puppets: merged.puppets, appliedIds: applied, refusedDemandCount, storylineSeeds };
+  return { world: merged, puppets: merged.puppets, appliedIds: applied, refusedDemandCount, storylineSeeds: [...storylineResolutions, ...storylineSeeds] };
 };
 
 export const applyDiplomaticUpdates = ({

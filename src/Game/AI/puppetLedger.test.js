@@ -287,3 +287,47 @@ test("a contented Puppet gets no Storyline", () => {
   };
   assert.deepEqual(apply(world, "loyalty~USSR~Poland~~80~~1~Calm").storylineSeeds, []);
 });
+
+test("a revolt settles the Storyline that led to it", () => {
+  const world = {
+    ...baseWorld,
+    storylines: [{
+      id: "storyline-puppet-poland",
+      kind: "unrest",
+      title: "Resentment in Poland",
+      status: "active",
+      pressure: 88,
+      momentum: 60,
+      startedDate: "1950-01-01",
+      state: "Poland chafes.",
+      participants: ["Poland", "USSR"],
+    }],
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 6, secrecy: "open", status: "active" }],
+  };
+
+  const merge = apply(world, "revolt~USSR~Poland~~~~1~Warsaw rises");
+  assert.ok(merge.storylineSeeds.some((line) => line.startsWith("storyline-puppet-poland~resolved~")),
+    "the resentment has nothing left to ripen");
+  assert.ok(!merge.storylineSeeds.some((line) => line.startsWith("storyline-puppet-poland~active~")),
+    "and is not re-opened by the seeder in the same pass");
+});
+
+test("a suppressed rising settles it too", () => {
+  const world = {
+    ...baseWorld,
+    storylines: [{
+      id: "storyline-puppet-poland",
+      kind: "unrest",
+      title: "Resentment in Poland",
+      status: "active",
+      pressure: 90,
+      momentum: 70,
+      startedDate: "1950-01-01",
+      state: "Poland chafes.",
+      participants: ["Poland", "USSR"],
+    }],
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 6, secrecy: "open", status: "active" }],
+  };
+  const merge = apply(world, "suppress~USSR~Poland~~~~1~Put down");
+  assert.ok(merge.storylineSeeds.some((line) => line.startsWith("storyline-puppet-poland~resolved~")));
+});

@@ -1093,7 +1093,7 @@ export const JUMP_FORWARD_SCHEMA = {
     puppetUpdates: {
       type: "string",
       description:
-        "Compact newline-separated subordination updates - one polity directing another while it remains a separate country. Empty string when no subordination is installed, reclassified, revealed, released, annexed or thrown off. Record format is documented in the live prompt.",
+        "Compact newline-separated subordination updates - one polity directing another while it remains a separate country. Ops: install, reclassify, loyalty, reveal, release, annex, revolt, suppress. Empty string when no subordination changes. Record format is documented in the live prompt.",
     },
   },
   // clearActions is deliberately NOT required: simulateTimelineJump already

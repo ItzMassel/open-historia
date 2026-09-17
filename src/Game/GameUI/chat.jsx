@@ -27,7 +27,7 @@ import { fetchCommunityFlags, loadCommunityFlagDataUrl } from "../../runtime/com
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { readChatsState, writeChatsState, readGameData, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
-import { visiblePuppetsFor } from "../../runtime/puppets.js";
+import { describeRole, visiblePuppetsFor } from "../../runtime/puppets.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import { formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
@@ -1388,16 +1388,22 @@ const usePuppetMarkers = () => {
         let cancelled = false;
         const load = async () => {
             try {
+                // The cached view, not a forced re-read: this decorates a list
+                // row, and forcing world.json off the server every 15 s for the
+                // life of the panel is a lot of traffic for a label.
                 const [world, game] = await Promise.all([
-                    readWorldState({ force: true }),
+                    readWorldStateView().catch(() => ({})),
                     readGameData().catch(() => ({})),
                 ]);
                 if (cancelled) return;
                 const next = {};
                 for (const row of visiblePuppetsFor(world, game?.country || "")) {
                     if (row.status !== "active") continue;
-                    if (row.role === "puppet") next[row.overlord] = "YOUR OVERLORD";
-                    else if (row.role === "overlord") next[row.puppet] = `YOUR ${row.kind.toUpperCase()}`;
+                    describeRole(row, {
+                        puppet: () => { next[row.overlord] = "YOUR OVERLORD"; },
+                        overlord: () => { next[row.puppet] = `YOUR ${row.kind.toUpperCase()}`; },
+                        foreign: () => {},
+                    });
                 }
                 setMarkers(next);
             } catch { /* a marker is decoration; never break the list for it */ }
