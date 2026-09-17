@@ -23,8 +23,11 @@ test("a refusal survives being written and read back", () => {
     text: "Warsaw will not send divisions east.",
     time: "1952-03-04",
     refusedOverlord: "USSR",
+    refusedPuppet: "Poland",
   }));
   assert.equal(chat.messages[0].refusedOverlord, "USSR");
+  assert.equal(chat.messages[0].refusedPuppet, "Poland");
+  assert.equal(chat.messages[0].refusalChargedRound, 0, "not counted yet");
 });
 
 test("an ordinary message carries an empty refusal rather than none at all", () => {
@@ -37,4 +40,19 @@ test("a message stored as a bare string has the same shape as any other", () => 
   assert.deepEqual(Object.keys(chat.messages[0]).sort(), Object.keys(
     normalizeChats(chatWith({ role: "leader", speaker: "Poland", text: "x" }))[0].messages[0],
   ).sort());
+});
+
+test("a refusal already charged remembers the round that charged it", () => {
+  // Dates cannot answer "has this been counted?" - a retried jump lands on the
+  // same game date, and without the stamp the same refusal costs Loyalty twice.
+  const [chat] = normalizeChats(chatWith({
+    role: "leader",
+    speaker: "Poland",
+    text: "No.",
+    time: "1952-03-04",
+    refusedOverlord: "USSR",
+    refusedPuppet: "Poland",
+    refusalChargedRound: 7,
+  }));
+  assert.equal(chat.messages[0].refusalChargedRound, 7);
 });

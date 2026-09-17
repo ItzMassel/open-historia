@@ -534,6 +534,8 @@ const normalizeChatMessage = (message, index = 0) => {
       time: "",
       memorySummary: "",
       refusedOverlord: "",
+      refusedPuppet: "",
+      refusalChargedRound: 0,
     };
   }
 
@@ -563,6 +565,14 @@ const normalizeChatMessage = (message, index = 0) => {
     // know is a field the next write silently drops — which is exactly how that
     // rule spent two commits looking wired up while never once firing.
     refusedOverlord: normalizeOptionalString(message.refusedOverlord),
+    refusedPuppet: normalizeOptionalString(message.refusedPuppet),
+    // The round that already charged this refusal. Dates alone cannot answer
+    // "has this been counted?" - a jump that failed part-way and was retried, or
+    // a save reloaded and jumped again, lands on the SAME game date and would
+    // charge the same refusal twice. 0 means never charged.
+    refusalChargedRound: Number.isFinite(Number(message.refusalChargedRound))
+      ? Math.max(0, Math.trunc(Number(message.refusalChargedRound)))
+      : 0,
     text,
     time: normalizeOptionalString(message.time || message.date),
   };

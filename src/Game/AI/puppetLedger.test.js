@@ -331,3 +331,27 @@ test("a suppressed rising settles it too", () => {
   const merge = apply(world, "suppress~USSR~Poland~~~~1~Put down");
   assert.ok(merge.storylineSeeds.some((line) => line.startsWith("storyline-puppet-poland~resolved~")));
 });
+
+test("annexing a Puppet costs the Overlord standing, and costs more when it was open", () => {
+  const seated = (secrecy) => ({
+    ...baseWorld,
+    internationalReputation: { USSR: 60 },
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 90, secrecy, status: "active" }],
+  });
+
+  const openly = apply(seated("open"), "annex~USSR~Poland~~~~1~Absorbed").world;
+  const quietly = apply(seated("covert"), "annex~USSR~Poland~~~~1~Absorbed").world;
+
+  assert.equal(openly.internationalReputation.USSR, 44, "the world watched a country disappear");
+  assert.equal(quietly.internationalReputation.USSR, 52, "a client nobody knew of costs less to swallow");
+  assert.ok(openly.internationalReputation.USSR < quietly.internationalReputation.USSR);
+});
+
+test("releasing a Puppet costs nothing", () => {
+  const world = {
+    ...baseWorld,
+    internationalReputation: { USSR: 60 },
+    puppets: [{ id: "p1", overlord: "USSR", puppet: "Poland", kind: "satellite", loyalty: 90, secrecy: "open", status: "active" }],
+  };
+  assert.equal(apply(world, "release~USSR~Poland~~~~1~Let go").world.internationalReputation.USSR, 60);
+});

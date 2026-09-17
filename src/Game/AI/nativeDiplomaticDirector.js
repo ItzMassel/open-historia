@@ -1348,6 +1348,14 @@ const SUPPRESSED_COUP_LOYALTY_GAIN = 25;
 // director is given something to ripen. Not a trigger: the Storyline decides
 // WHEN, and may decide never.
 const COUP_STORYLINE_LOYALTY = 35;
+
+// Swallowing a client costs standing, and costs more the more openly it was a
+// client — the world watched a country disappear. Deterministic rather than left
+// to the prompt, because a cost the model only sometimes remembers is a cost
+// players learn to ignore, and then a Puppet is just free territory with a
+// waiting period. That is the one thing this whole subsystem exists to prevent.
+const ANNEXED_PUPPET_REPUTATION_COST = 8;
+const ANNEXED_OPEN_PUPPET_REPUTATION_COST = 16;
 export const puppetCoupStorylineId = (row) => `storyline-puppet-${slug(row?.puppet)}`;
 
 const decodePuppetLine = (line, index) => {
@@ -1589,6 +1597,13 @@ export const applyPuppetUpdates = ({
       patch.status = update.op === "release" ? "released" : update.op === "annex" ? "annexed" : "revolted";
       patch.endedDate = date || existing.lastUpdatedDate;
     }
+    if (update.op === "annex") {
+      const cost = existing.secrecy === "covert" ? ANNEXED_PUPPET_REPUTATION_COST : ANNEXED_OPEN_PUPPET_REPUTATION_COST;
+      const reputation = { ...(nextWorld.internationalReputation || {}) };
+      const before = Number.isFinite(Number(reputation[overlord])) ? Number(reputation[overlord]) : 50;
+      reputation[overlord] = clamp(Math.round(before - cost), 0, 100);
+      nextWorld = { ...nextWorld, internationalReputation: reputation };
+    }
 
     rows = rows.map((row) => row === existing ? { ...row, ...patch } : row);
     // The resentment played out, one way or another: it revolted, it was put
@@ -1730,7 +1745,22 @@ const puppetDisplay = (row, world) => {
   const knownTo = array(row.knownTo)
     .map((entry) => diplomaticDisplayName(world, entry?.polity || entry))
     .filter((name) => lower(name) !== lower(overlord) && lower(name) !== lower(puppet));
-  return `- ${overlord} directs ${puppet} | ${row.kind} | ${secrecy} | loyalty ${row.loyalty}` +
+  // Whether the Overlord could plausibly SEE trouble coming inside its own
+  // Puppet. The engine owns that fact, the model owns the fiction — the same
+  // line the projects board draws between whether a question can honestly be
+  // asked and what the answer is. Without it the model simply invented whether
+  // foreknowledge was earned, which made "warning is bought with espionage"
+  // untrue whenever it guessed generously.
+  const watching = array(world.spies).some((spy) =>
+    lower(spy?.owner) === lower(row.overlord) && lower(spy?.target) === lower(row.puppet) && lower(spy?.status) === "active");
+  const service = Number(world.intelligence?.[row.overlord]);
+  const eyes = watching
+    ? " | the overlord has an agent inside: unrest there is visible to it"
+    : Number.isFinite(service) && service >= 70
+      ? " | the overlord's services are strong: it may catch word of unrest there"
+      : " | the overlord has no eyes inside: unrest there would take it by surprise";
+
+  return `- ${overlord} directs ${puppet} | ${row.kind} | ${secrecy} | loyalty ${row.loyalty}${eyes}` +
     (row.startedDate ? ` | since ${row.startedDate}` : "") +
     (row.secrecy === "covert" ? ` | also known to: ${knownTo.length ? knownTo.join(", ") : "nobody else"}` : "");
 };

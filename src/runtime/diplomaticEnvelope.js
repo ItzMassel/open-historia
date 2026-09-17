@@ -24,21 +24,32 @@ export const parseDiplomaticEnvelope = (raw) => {
     text = text.slice(0, reactionMatch.index).trimEnd();
   }
 
-  // REFUSED_DEMAND names the Overlord whose demand this speaker has just turned
-  // down. It is what makes the one deterministic Loyalty rule possible: a demand
-  // is negotiable text, so without a signal the engine has no way to know a
-  // refusal happened, and the cost would depend on the model remembering to
-  // score it - which is the very thing the rule exists to escape.
+  // REFUSED_DEMAND names BOTH parties: `<overlord> -> <puppet>`.
+  //
+  // Naming both is what lets it work in both directions. When an AI Puppet
+  // refuses, it marks its own reply. When the PLAYER is the Puppet, their
+  // refusal is typed text that carries no envelope at all - so the Overlord's
+  // next reply (the one that says there will be consequences) marks it instead.
+  // An earlier version named only the Overlord and assumed the speaker was the
+  // Puppet, which quietly meant the player could refuse for free forever.
+  //
+  // It is what makes the one deterministic Loyalty rule possible: a demand is
+  // negotiable text, so without a signal the engine has no way to know a refusal
+  // happened, and the cost would fall back on the model remembering to score it
+  // - the very thing the rule exists to escape. The jump still narrates the
+  // fallout from the transcript on top; the two are not competing.
   //
   // Hidden metadata like the two beside it, and stripped the same way: it must
-  // never reach the chat bubble.
+  // never reach the chat bubble. Matched as its OWN LINE anywhere in the output
+  // rather than anchored to the end, because a model that reorders the three
+  // hidden lines would otherwise fold this one into the memory.
   let refusedOverlord = "";
-  // Matched as its OWN LINE anywhere in the output rather than anchored to the
-  // end, because the three hidden lines are stripped in a fixed order and a
-  // model that reorders them would otherwise fold this one into the memory.
+  let refusedPuppet = "";
   const refusalMatch = text.match(/^[ \t]*REFUSED_DEMAND[ \t]*:[ \t]*(.+)$/im);
   if (refusalMatch) {
-    refusedOverlord = clean(refusalMatch[1]);
+    const [left, right] = String(refusalMatch[1]).split(/-+>|\u2192/);
+    refusedOverlord = clean(left);
+    refusedPuppet = clean(right);
     text = (text.slice(0, refusalMatch.index) + text.slice(refusalMatch.index + refusalMatch[0].length)).trim();
   }
 
@@ -48,7 +59,7 @@ export const parseDiplomaticEnvelope = (raw) => {
     text = text.slice(0, memoryMatch.index).trimEnd();
   }
 
-  return { reply: text, reaction, memorySummary, refusedOverlord };
+  return { reply: text, reaction, memorySummary, refusedOverlord, refusedPuppet };
 };
 
 // The newest durable memory a saved transcript carries, with the game date of

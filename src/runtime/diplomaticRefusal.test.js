@@ -10,26 +10,40 @@ import { parseDiplomaticEnvelope } from "./diplomaticEnvelope.js";
 // rule possible — and, like REACTION and DIPLOMATIC_MEMORY, it must never reach
 // the chat bubble.
 
-test("a refusal names the Overlord and is stripped from the reply", () => {
-  const { reply, refusedOverlord } = parseDiplomaticEnvelope(
-    "Warsaw will not send divisions east. We have given enough.\nREFUSED_DEMAND: USSR",
+test("a refusing Puppet marks both parties on its own reply", () => {
+  const { reply, refusedOverlord, refusedPuppet } = parseDiplomaticEnvelope(
+    "Warsaw will not send divisions east. We have given enough.\nREFUSED_DEMAND: USSR -> Poland",
   );
   assert.equal(refusedOverlord, "USSR");
+  assert.equal(refusedPuppet, "Poland");
   assert.equal(reply, "Warsaw will not send divisions east. We have given enough.");
 });
 
+test("an Overlord marks the same pair when the PLAYER was the one refusing", () => {
+  // The player's refusal is typed text and carries no envelope, so the reply
+  // that answers it is where the signal has to live.
+  const { reply, refusedOverlord, refusedPuppet } = parseDiplomaticEnvelope(
+    "Then there will be consequences, comrade." + String.fromCharCode(10) + "REFUSED_DEMAND: USSR -> Poland",
+  );
+  assert.equal(refusedOverlord, "USSR");
+  assert.equal(refusedPuppet, "Poland");
+  assert.equal(reply, "Then there will be consequences, comrade.");
+});
+
 test("a reply that refuses nothing carries no signal", () => {
-  const { reply, refusedOverlord } = parseDiplomaticEnvelope("We will consider it.");
+  const { reply, refusedOverlord, refusedPuppet } = parseDiplomaticEnvelope("We will consider it.");
   assert.equal(refusedOverlord, "");
+  assert.equal(refusedPuppet, "");
   assert.equal(reply, "We will consider it.");
 });
 
 test("the refusal survives alongside the reaction and the durable memory", () => {
-  const { reply, reaction, memorySummary, refusedOverlord } = parseDiplomaticEnvelope(
-    ["We decline.", "REFUSED_DEMAND: USSR", "DIPLOMATIC_MEMORY: Moscow demanded troops; Warsaw refused.", "REACTION: 😠"].join("\n"),
+  const { reply, reaction, memorySummary, refusedOverlord, refusedPuppet } = parseDiplomaticEnvelope(
+    ["We decline.", "REFUSED_DEMAND: USSR -> Poland", "DIPLOMATIC_MEMORY: Moscow demanded troops; Warsaw refused.", "REACTION: 😠"].join("\n"),
   );
   assert.equal(reply, "We decline.");
   assert.equal(refusedOverlord, "USSR");
+  assert.equal(refusedPuppet, "Poland");
   assert.equal(reaction, "😠");
   assert.match(memorySummary, /Warsaw refused/);
   assert.doesNotMatch(reply, /REFUSED_DEMAND|DIPLOMATIC_MEMORY|REACTION/);

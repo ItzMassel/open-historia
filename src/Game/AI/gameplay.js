@@ -519,7 +519,7 @@ Relation decision model: a canonical bilateral relation score/status is persiste
   ops: install (create) | reclassify (change kind) | loyalty (move the score) | reveal (covert becomes open, permanently) | release (the overlord lets go) | annex (absorbed) | revolt (thrown off) | suppress (a rising CRUSHED - the overlord holds on, loyalty is forced up at gunpoint, and the overlord's reputation should fall with it). kind is one of protectorate (keeps internal rule, surrenders foreign policy) | satellite (keeps formal sovereignty, loses real independence) | client (bought or installed government); it states WHICH POWERS the overlord holds, not how tightly, so use reclassify rather than treating the three as a scale. loyalty is 0-100, how far the puppet accepts direction - move it when the period earned it, never merely because time passed. secrecy is open (the arrangement is publicly known, as a signed protectorate is) or covert (only the two parties know). Only install needs kind/loyalty/secrecy; the rest may leave them blank.
   A puppet may hold no puppets of its own: installing one over a polity that already has them moves those to the new overlord automatically. A polity has at most one overlord, and reveal cannot be undone.
   Coup model: a puppet whose loyalty has collapsed has a hidden storyline building against it, and YOU decide whether and when that breaks. A rising may succeed (emit revolt) or be put down (emit suppress); either is a real outcome and neither is owed to the player. Before it breaks, unrest should be VISIBLE to an overlord who has the means to see it - if the overlord has an agent inside the puppet or a strong intelligence service, return a timeline event reporting the unrest, so the warning is bought rather than given. A puppet at high loyalty does not revolt.
-  Puppet decision model: a Puppet is a SEPARATE COUNTRY with its own interests, not a possession. It may refuse what its overlord demands, and loyalty is the prior for how likely that is, never a veto. Annexing one's own Puppet meets far less resistance than conquering a foreign power, and a Puppet at high loyalty may accept absorption outright - but it always costs standing: emit a polityChanges reputation drop for the overlord when a Puppet is annexed, larger when the subordination was openly known, because the world watched a country be swallowed. A covert Puppet must speak and act as a fully independent country toward anyone not party to the arrangement.
+  Puppet decision model: a Puppet is a SEPARATE COUNTRY with its own interests, not a possession. It may refuse what its overlord demands, and loyalty is the prior for how likely that is, never a veto. Annexing one's own Puppet meets far less resistance than conquering a foreign power, and a Puppet at high loyalty may accept absorption outright - and the standing it costs the overlord is applied for you - do not emit a polityChanges reputation drop for it as well, or it is paid twice. A covert Puppet must speak and act as a fully independent country toward anyone not party to the arrangement.
 - Return relationUpdates:"", agreementUpdates:"" and puppetUpdates:"" when nothing material changes.`;
 };
 
@@ -5694,10 +5694,23 @@ const applySimulationResult = async ({
   // happened, because a world write from the chat panel would race the turn's.
   // Only messages from the round being resolved count, so a refusal is charged
   // once and no jump re-charges an old one.
-  const refusedDemands = normalizeChats(baseChats).flatMap((chat) =>
-    normalizeArray(chat?.messages)
-      .filter((message) => normalizeString(message?.refusedOverlord) && normalizeString(message?.time) === normalizeString(baseGame.gameDate))
-      .map((message) => ({ overlord: normalizeString(message.refusedOverlord), puppet: normalizeString(message.speaker) })));
+  // Charged ONCE, and not by date. A jump that failed part-way and was retried,
+  // or a save reloaded and jumped again, lands on the same game date and would
+  // charge the same refusal a second time — so the message itself records the
+  // round that counted it, and the stamp is written back with the turn's chats.
+  const refusalMessages = nextChats.flatMap((chat) => normalizeArray(chat?.messages)
+    .filter((message) =>
+      normalizeString(message?.refusedOverlord) &&
+      normalizeString(message?.refusedPuppet) &&
+      !(Number(message?.refusalChargedRound) > 0)));
+
+  // Both parties come off the message, never from who spoke: an AI Puppet marks
+  // its own refusal, while the Overlord marks the one that answers the PLAYER's.
+  const refusedDemands = refusalMessages.map((message) => ({
+    overlord: normalizeString(message.refusedOverlord),
+    puppet: normalizeString(message.refusedPuppet),
+  }));
+  for (const message of refusalMessages) message.refusalChargedRound = nextGame.round || 0;
 
   const diplomaticMerge = applyDiplomaticUpdates({
     world: worldWithImpacts,
