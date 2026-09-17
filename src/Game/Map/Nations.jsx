@@ -33,6 +33,7 @@ import {
 } from "../../runtime/countryLabels.js";
 import { translateLabel } from "../../runtime/translator.js";
 import { MAP_SETTING_KEYS, useMapSetting, useMapSettingValue } from "../../runtime/mapSettings.js";
+import { livePuppetsFor } from "../../runtime/puppets.js";
 import { useWorldState } from "./useWorldState.js";
 import { buildProvinceOutlinePaint, PROVINCE_OUTLINE_MIN_ZOOM } from "./provinceOutlineStyle.js";
 import { enforceMapLayerOrder } from "./mapLayerOrder.js";
@@ -496,7 +497,20 @@ const WorldMap = ({ isGlobe = false }) => {
   const mapDisplaySettings = {
     hideCountryLabels: useMapSetting(MAP_SETTING_KEYS.hideCountryLabels),
     disableCurvedCountryLabels: useMapSetting(MAP_SETTING_KEYS.disableCurvedCountryLabels),
+    showPuppetOverlay: useMapSetting(MAP_SETTING_KEYS.showPuppetOverlay),
   };
+
+  // Who is playing, for the puppet overlay below. Read once and kept: the
+  // overlay is the player's own view of their sphere, and the player does not
+  // change mid-session.
+  const [playerCountryName, setPlayerCountryName] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    readJson(JSON_URLS.game, { defaultValue: {} })
+      .then((game) => { if (!cancelled) setPlayerCountryName(String(game?.country ?? "").trim()); })
+      .catch(() => { /* no player yet is not an error; the overlay simply stays off */ });
+    return () => { cancelled = true; };
+  }, []);
   // A player's own choice from Settings > Map. Empty means "whatever the
   // scenario author set", so it changes nothing until it is filled in.
   const labelFontOverride = useMapSettingValue(MAP_SETTING_KEYS.labelFont);
@@ -974,6 +988,43 @@ const WorldMap = ({ isGlobe = false }) => {
   const visibleDerivedOwnerFilter = useMemo(() => dirtyPoliticalOwners.length
     ? ["!", ["in", ["coalesce", ["get", "sourceOwner"], ["get", "owner"], ""], dirtyOwnersLiteral]]
     : ["all"], [dirtyOwnersLiteral, dirtyPoliticalOwners.length]);
+  // THE PUPPET OVERLAY. Off by default; when on, a boundary touching one of the
+  // player's own Puppets is traced in its Overlord's colour, so a sphere of
+  // influence reads at a glance without touching the political map underneath.
+  //
+  // A LINE, never a fill and never a stripe. Striping already carries two
+  // meanings on this map - DISPUTED from regionClaimants and OCCUPIED from
+  // regionSovereigntyOverrides - and a third would make a contested satellite
+  // border unreadable at exactly the moment the player most needs to read it.
+  //
+  // Which Puppets the player may see is not decided here: livePuppetsFor is the
+  // same answer the country panel and the diplomacy markers get, so the three
+  // cannot disagree about the player's own empire.
+  const puppetOverlayRows = useMemo(
+    () => (mapDisplaySettings.showPuppetOverlay && worldKnown
+      ? livePuppetsFor(worldState, playerCountryName).filter((row) => row.role === "overlord")
+      : []),
+    [mapDisplaySettings.showPuppetOverlay, worldKnown, worldState, playerCountryName],
+  );
+
+  const puppetOverlayFilter = useMemo(
+    () => (puppetOverlayRows.length
+      ? ["any", ...puppetOverlayRows.map((row) => ["in", row.puppet, ["get", "ownerList"]])]
+      : ["==", ["literal", 1], ["literal", 0]]),
+    [puppetOverlayRows],
+  );
+
+  // One case branch per Puppet, so each sphere traces in the colour of whoever
+  // holds it rather than a single generic accent.
+  const puppetOverlayColor = useMemo(() => {
+    if (!puppetOverlayRows.length) return "rgba(0,0,0,0)";
+    const branches = puppetOverlayRows.flatMap((row) => [
+      ["in", row.puppet, ["get", "ownerList"]],
+      ownerColorCss(row.overlord),
+    ]);
+    return ["case", ...branches, "rgba(0,0,0,0)"];
+  }, [puppetOverlayRows, ownerColorCss]);
+
   const visibleBoundaryFilter = useMemo(() => dirtyPoliticalOwners.length
     ? ["!", ["any", ...dirtyPoliticalOwners.map((owner) => ["in", owner, ["get", "ownerList"]])]]
     : ["all"], [dirtyPoliticalOwners]);
@@ -3336,6 +3387,18 @@ const WorldMap = ({ isGlobe = false }) => {
             "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.8, 3, 2.5, 6, 3.6, 9, 4.7, 12, 5.8],
             "line-blur": ["interpolate", ["linear"], ["zoom"], 1, 0.7, 6, 1.15, 12, 1.5],
             "line-opacity": customActive && worldKnown ? 0.52 : 0,
+          }}
+        />
+        <Layer
+          id="polity-puppet-overlay"
+          type="line"
+          filter={puppetOverlayFilter}
+          layout={{ "line-cap": "round", "line-join": "round" }}
+          paint={{
+            "line-color": puppetOverlayColor,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.6, 3, 2.4, 6, 3.2, 9, 4, 12, 4.6],
+            "line-dasharray": [2, 1.6],
+            "line-opacity": puppetOverlayRows.length ? 0.85 : 0,
           }}
         />
         <Layer

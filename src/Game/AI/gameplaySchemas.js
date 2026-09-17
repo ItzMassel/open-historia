@@ -1090,6 +1090,11 @@ export const JUMP_FORWARD_SCHEMA = {
       description:
         "Compact newline-separated formal treaty/agreement lifecycle updates. Empty string when no formal commitment starts, changes, suspends, resumes, ends, or expires. Record format is documented in the live prompt.",
     },
+    puppetUpdates: {
+      type: "string",
+      description:
+        "Compact newline-separated subordination updates - one polity directing another while it remains a separate country. Empty string when no subordination is installed, reclassified, revealed, released, annexed or thrown off. Record format is documented in the live prompt.",
+    },
   },
   // clearActions is deliberately NOT required: simulateTimelineJump already
   // reads it as `payload?.clearActions !== false`, so a missing value already

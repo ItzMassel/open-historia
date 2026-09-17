@@ -26,7 +26,8 @@ import { resolvePolityFlag } from "../../runtime/polityFlags.js";
 import { fetchCommunityFlags, loadCommunityFlagDataUrl } from "../../runtime/communityFlags.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { readChatsState, writeChatsState, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
+import { readChatsState, writeChatsState, readGameData, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
+import { visiblePuppetsFor } from "../../runtime/puppets.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import { formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
@@ -1368,7 +1369,42 @@ const GeneratingBanner = () => (
 
 // ── Chat list item ────────────────────────────────────────────────────────────
 
-const ChatListItem = ({ chat, onClick, onDelete, onToggleRead, unread = false }) => {
+// Which threads are the ones that matter politically: your Overlord, and the
+// countries you hold. Deliberately a MARKER on an existing row rather than a
+// tab or a panel of its own - being somebody's Puppet is played out through the
+// diplomacy the player already uses, and a new screen for it would be one more
+// thing to learn for a relationship they can already see.
+//
+// The answer comes from runtime/puppets.js, like the country panel's and the
+// map overlay's, so the three cannot disagree about the player's own empire.
+const usePuppetMarkers = () => {
+    const [markers, setMarkers] = React.useState({});
+    React.useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            try {
+                const [world, game] = await Promise.all([
+                    readWorldState({ force: true }),
+                    readGameData().catch(() => ({})),
+                ]);
+                if (cancelled) return;
+                const next = {};
+                for (const row of visiblePuppetsFor(world, game?.country || "")) {
+                    if (row.status !== "active") continue;
+                    if (row.role === "puppet") next[row.overlord] = "YOUR OVERLORD";
+                    else if (row.role === "overlord") next[row.puppet] = `YOUR ${row.kind.toUpperCase()}`;
+                }
+                setMarkers(next);
+            } catch { /* a marker is decoration; never break the list for it */ }
+        };
+        load();
+        const timer = setInterval(load, 15000);
+        return () => { cancelled = true; clearInterval(timer); };
+    }, []);
+    return markers;
+};
+
+const ChatListItem = ({ chat, onClick, onDelete, onToggleRead, unread = false, puppetMarkers = {} }) => {
     const [hovered, setHovered] = React.useState(false);
     // Deleting a chat is not undoable, so the bin arms first and deletes on the
     // second click. Resets whenever the pointer leaves the row, so a half-pressed
@@ -1377,6 +1413,7 @@ const ChatListItem = ({ chat, onClick, onDelete, onToggleRead, unread = false })
     const previewCountries = chat.countries.slice(0, 4);
     const flagUrlMap = useCountryFlagUrls(previewCountries);
     const names    = chat.countries.map(c => c.name).join(", ");
+    const chatMarker = chat.countries.map((c) => puppetMarkers[c.name]).find(Boolean) || "";
     const lastMsg  = chat.messages?.at(-1);
     const preview  = lastMsg ? lastMsg.text.replace(/\*\*/g, "").slice(0, 60) + (lastMsg.text.length > 60 ? "…" : "") : "No messages yet";
 
@@ -1396,6 +1433,9 @@ const ChatListItem = ({ chat, onClick, onDelete, onToggleRead, unread = false })
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: "0.82rem", fontWeight: unread ? 700 : 600, color: unread ? "#fff" : "rgba(255,255,255,0.9)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{names}{unread && <span style={{ fontWeight: 400, fontSize: "0.7rem", color: "#60a5fa", marginLeft: "0.4rem" }}>new</span>}</div>
+        {chatMarker && (
+            <div style={{ color: "rgba(234,179,8,0.9)", fontSize: "0.63rem", fontWeight: 800, letterSpacing: "0.04em", marginTop: "0.1rem" }}>{chatMarker}</div>
+        )}
         <div style={{ fontSize: "0.75rem", color: unread ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.35)", marginTop: "0.15rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{preview}</div>
         </div>
         </button>
@@ -1723,6 +1763,7 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     // or this game's own override); a view left on it shows the diplomacy list.
     const espionageOn = useActiveFeatures().espionage?.enabled !== false;
     const currentView = espionageOn ? view : "chats";
+    const puppetMarkers = usePuppetMarkers();
     const [countries, setCountries]               = useState([]);
     const [loadingCountries, setLoadingCountries] = useState(true);
     const [playerCountry, setPlayerCountry]       = useState("your nation");
@@ -2121,7 +2162,7 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
                 ) : groupedChats.map((group, index) => (
                     <React.Fragment key={`${group.label}-${group.chats[0]?.id ?? index}`}>
                     <ChatGroupHeader label={group.label} />
-                    {group.chats.map(chat => <ChatListItem key={chat.id} chat={chat} unread={unreadIds.has(String(chat.id))} onClick={() => openChatFromList(chat)} onDelete={() => handleDeleteChat(chat.id)} onToggleRead={() => setChatReadState(chat, unreadIds.has(String(chat.id)))} />)}
+                    {group.chats.map(chat => <ChatListItem key={chat.id} chat={chat} puppetMarkers={puppetMarkers} unread={unreadIds.has(String(chat.id))} onClick={() => openChatFromList(chat)} onDelete={() => handleDeleteChat(chat.id)} onToggleRead={() => setChatReadState(chat, unreadIds.has(String(chat.id)))} />)}
                     </React.Fragment>
                 ))}
                 </div>

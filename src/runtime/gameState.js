@@ -2,6 +2,7 @@
 import { JSON_URLS, primeJson, readJson, reportPerfOperation, writeJson } from "./assets.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
+import { PUPPET_KINDS, PUPPET_SECRECIES, PUPPET_STATUSES } from "./puppets.js";
 import { displayNameMigrations, renamePolityInColors, renamePolityInWorld } from "../../server/polityRename.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
 import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
@@ -145,6 +146,10 @@ export const WORLD_DEFAULTS = {
   // save's older treaty/alliance events, so that only ever happens once.
   diplomaticLedgerVersion: 0,
   wars: [],
+  // Subordinations: who directs whom. Directional, partly secret, and written
+  // only through the diplomatic director's compact puppetUpdates lines — see
+  // docs/adr/0003-puppet-ledger-and-secrecy.md.
+  puppets: [],
   // Persistent storylines: the hidden state of the world's ongoing processes
   // (AI/nativeWorldDirector.js), advanced by compact storylineUpdates lines on
   // a jump payload exactly like the ledgers above.
@@ -280,6 +285,10 @@ const WORLD_STORYLINE_STATUS_SET = new Set(["active", "dormant", "resolved"]);
 const MAX_WORLD_STORYLINES = 96;
 const MAX_WORLD_RELATIONS = 256;
 const MAX_WORLD_AGREEMENTS = 128;
+// Sized like the agreements ledger and for the same reason: every row rides the
+// simulator, advisor and chat prompts every turn. Ended rows are kept below the
+// cap on purpose — stale foreign knowledge depends on them surviving.
+const MAX_WORLD_PUPPETS = 64;
 
 const normalizeTextLike = (value) => {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -3200,6 +3209,87 @@ const normalizeWorldAgreements = (value, identityWorld) => {
     .slice(0, MAX_WORLD_AGREEMENTS);
 };
 
+// A subordination is DIRECTIONAL (overlord -> puppet), unlike a relation, and
+// partly secret, unlike an agreement. See puppets.js for what a viewer may see
+// of one, and the ADR for why it is neither of those two things.
+const normalizeWorldPuppet = (entry, identityWorld, index = 0) => {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const overlord = resolveWorldDiplomaticPolity(entry.overlord, identityWorld);
+  const puppet = resolveWorldDiplomaticPolity(entry.puppet, identityWorld);
+  // Nobody directs themselves, and a one-sided row names no relationship.
+  if (!overlord || !puppet || overlord.toLocaleLowerCase() === puppet.toLocaleLowerCase()) return null;
+
+  const status = PUPPET_STATUSES.includes(normalizeOptionalString(entry.status).toLowerCase())
+    ? normalizeOptionalString(entry.status).toLowerCase()
+    : "active";
+  const loyaltyNumber = Number(entry.loyalty);
+  const kind = normalizeOptionalString(entry.kind).toLowerCase();
+  const secrecy = normalizeOptionalString(entry.secrecy).toLowerCase();
+
+  // knownTo carries WHEN each polity learned a covert arrangement, because the
+  // panel shows that date and a bare name cannot answer it. A plain string is
+  // still accepted — it grants sight with no date to show.
+  const seen = new Set();
+  const knownTo = [];
+  for (const raw of normalizeArray(entry.knownTo)) {
+    const polity = resolveWorldDiplomaticPolity(typeof raw === "string" ? raw : raw?.polity, identityWorld);
+    if (!polity) continue;
+    const key = polity.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    knownTo.push({ polity, learnedDate: typeof raw === "string" ? "" : canonicalizeDateString(raw?.learnedDate) });
+    if (knownTo.length >= 24) break;
+  }
+
+  return {
+    id: normalizeOptionalString(entry.id) || `puppet-${index}`,
+    overlord,
+    puppet,
+    kind: PUPPET_KINDS.includes(kind) ? kind : "client",
+    loyalty: Number.isFinite(loyaltyNumber) ? Math.max(0, Math.min(100, Math.round(loyaltyNumber))) : 50,
+    secrecy: PUPPET_SECRECIES.includes(secrecy) ? secrecy : "open",
+    knownTo,
+    status,
+    startedDate: canonicalizeDateString(entry.startedDate),
+    endedDate: status === "active" ? "" : canonicalizeDateString(entry.endedDate || entry.lastUpdatedDate),
+    lastUpdatedDate: canonicalizeDateString(entry.lastUpdatedDate || entry.startedDate),
+    sourceEventIds: [...new Set(normalizeActionParticipants(entry.sourceEventIds))].slice(-24),
+    createdRound: Number.isFinite(Number(entry.createdRound)) ? Math.max(0, Math.trunc(Number(entry.createdRound))) : 0,
+    updatedRound: Number.isFinite(Number(entry.updatedRound)) ? Math.max(0, Math.trunc(Number(entry.updatedRound))) : 0,
+  };
+};
+
+const normalizeWorldPuppets = (value, identityWorld) => {
+  const rows = [];
+  // One Overlord per Puppet. A second LIVE row for the same Puppet is the
+  // condominium this deliberately does not model, so it loses to the first;
+  // an ended row never blocks a new Overlord, or a country could be subjugated
+  // exactly once in a campaign.
+  const liveByPuppet = new Set();
+  const ids = new Set();
+  normalizeArray(value).forEach((entry, index) => {
+    const normalized = normalizeWorldPuppet(entry, identityWorld, index);
+    if (!normalized || ids.has(normalized.id)) return;
+    const key = normalized.puppet.toLocaleLowerCase();
+    if (normalized.status === "active") {
+      if (liveByPuppet.has(key)) return;
+      liveByPuppet.add(key);
+    }
+    ids.add(normalized.id);
+    rows.push(normalized);
+  });
+
+  if (rows.length <= MAX_WORLD_PUPPETS) return rows;
+
+  // Evict what is OVER before what is live, oldest first — never a live row.
+  // .slice() would drop whatever happened to be last, which is live work as
+  // often as not (the same rule the projects board uses).
+  const live = rows.filter((row) => row.status === "active");
+  const ended = rows.filter((row) => row.status !== "active")
+    .sort((a, b) => compareGameDates(b.lastUpdatedDate || "", a.lastUpdatedDate || "") || a.id.localeCompare(b.id));
+  return [...live, ...ended.slice(0, Math.max(0, MAX_WORLD_PUPPETS - live.length))].slice(0, MAX_WORLD_PUPPETS);
+};
+
 export const normalizeWorldState = (world) => {
   const nextWorld = world && typeof world === "object" ? world : {};
   const polityOverrides = Object.fromEntries(
@@ -3399,6 +3489,7 @@ export const normalizeWorldState = (world) => {
       ? Math.max(0, Math.trunc(Number(nextWorld.diplomaticLedgerVersion)))
       : 0,
     wars: normalizeWorldWars(nextWorld.wars),
+    puppets: normalizeWorldPuppets(nextWorld.puppets, diplomaticIdentityWorld),
     storylines: normalizeWorldStorylines(nextWorld.storylines),
     simulationRules: normalizeOptionalString(nextWorld.simulationRules),
     startingTimelineText: normalizeOptionalString(nextWorld.startingTimelineText),

@@ -163,6 +163,8 @@ import {
 import {
   DIPLOMATIC_LEDGER_VERSION,
   applyDiplomaticUpdates,
+  bindPuppetUpdatesToEvents,
+  decodePuppetUpdates,
   bindAgreementUpdatesToEvents,
   bindRelationUpdatesToEvents,
   buildBoundedDiplomaticContext,
@@ -512,7 +514,11 @@ Relation decision model: a canonical bilateral relation score/status is persiste
 - agreementUpdates is compact text, one record per line:
   agreementId~op~type~partiesCSV~eventNumbersCSV~title~terms
   ops: start | update | suspend | resume | end | expire. type is one of alliance | mutual_defense | guarantee | non_aggression | friendship_consultation | trade_economic | military_cooperation | military_access | neutrality | peace_settlement | other. Use a stable, descriptive agreementId (e.g. franco-russian-alliance-1894) and reuse it for later lifecycle records; every record needs a real causal event in this response, and only start needs the full type/parties/title.
-- Return relationUpdates:"" and agreementUpdates:"" when nothing material changes.`;
+- puppetUpdates is compact text, one record per line, for a SUBORDINATION - one polity directing another's will while it remains a separate country holding its own territory and its own sovereignty:
+  op~overlord~puppet~kind~loyalty~secrecy~eventNumbersCSV~note
+  ops: install | reclassify | loyalty | reveal | release | annex | revolt. kind is one of protectorate (keeps internal rule, surrenders foreign policy) | satellite (keeps formal sovereignty, loses real independence) | client (bought or installed government); it states WHICH POWERS the overlord holds, not how tightly, so use reclassify rather than treating the three as a scale. loyalty is 0-100, how far the puppet accepts direction - move it when the period earned it, never merely because time passed. secrecy is open (the arrangement is publicly known, as a signed protectorate is) or covert (only the two parties know). Only install needs kind/loyalty/secrecy; the rest may leave them blank.
+  A puppet may hold no puppets of its own: installing one over a polity that already has them moves those to the new overlord automatically. A polity has at most one overlord, and reveal cannot be undone.
+- Return relationUpdates:"", agreementUpdates:"" and puppetUpdates:"" when nothing material changes.`;
 };
 
 const IDLE_RELATION_DECISION_MODEL = `[Diplomatic Relation Decision Model]
@@ -726,6 +732,7 @@ const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0 }) 
   const boundEvents = normalizeArray(candidate.events);
   candidate.warUpdates = bindWarUpdatesToEvents(decodeWarUpdates(candidate.warUpdates), boundEvents);
   candidate.relationUpdates = bindRelationUpdatesToEvents(decodeRelationUpdates(candidate.relationUpdates), boundEvents);
+  candidate.puppetUpdates = bindPuppetUpdatesToEvents(decodePuppetUpdates(candidate.puppetUpdates), boundEvents);
   candidate.agreementUpdates = bindAgreementUpdatesToEvents(decodeAgreementUpdates(candidate.agreementUpdates), boundEvents);
   return "";
 };
@@ -864,6 +871,7 @@ const screenSegmentPayload = (payload, {
   delete payload.boardProvisionalEventIds;
   payload.warUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.warUpdates, taggedEvents, screened.events);
   payload.relationUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.relationUpdates, taggedEvents, screened.events);
+  payload.puppetUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.puppetUpdates, taggedEvents, screened.events);
   payload.agreementUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.agreementUpdates, taggedEvents, screened.events);
   payload.storylineUpdates = filterStorylineUpdatesAfterIntegrityScreen({
     updates: decodedStorylineUpdates,
@@ -916,6 +924,7 @@ const advanceLedgerWorld = (world, payload, { stopDate = "", round = 0 } = {}) =
     world: warMerge.world,
     relationUpdates: normalizeArray(payload?.relationUpdates),
     agreementUpdates: normalizeArray(payload?.agreementUpdates),
+    puppetUpdates: normalizeArray(payload?.puppetUpdates),
     events,
     stopDate,
     round,
@@ -5442,6 +5451,7 @@ const applySimulationResult = async ({
   const keptWarUpdates = filterBoundLedgerUpdatesToKeptEvents(result.warUpdates, dedupedEvents, curatedEvents);
   const keptRelationUpdates = filterBoundLedgerUpdatesToKeptEvents(result.relationUpdates, dedupedEvents, curatedEvents);
   const keptAgreementUpdates = filterBoundLedgerUpdatesToKeptEvents(result.agreementUpdates, dedupedEvents, curatedEvents);
+  const keptPuppetUpdates = filterBoundLedgerUpdatesToKeptEvents(result.puppetUpdates, dedupedEvents, curatedEvents);
   const keptStorylineUpdates = filterBoundLedgerUpdatesToKeptEvents(result.storylineUpdates, dedupedEvents, curatedEvents);
 
   // Canonical, round-scoped event ids (event-ai-r0007-19140801-003): unique
@@ -5457,6 +5467,7 @@ const applySimulationResult = async ({
   const warUpdates = remapLedgerEventIds(normalizeArray(keptWarUpdates), canonicalEventIdentity.idMap);
   const relationUpdates = remapLedgerEventIds(normalizeArray(keptRelationUpdates), canonicalEventIdentity.idMap);
   const agreementUpdates = remapLedgerEventIds(normalizeArray(keptAgreementUpdates), canonicalEventIdentity.idMap);
+  const puppetUpdates = remapLedgerEventIds(normalizeArray(keptPuppetUpdates), canonicalEventIdentity.idMap);
   const storylineUpdates = remapLedgerEventIds(normalizeArray(keptStorylineUpdates), canonicalEventIdentity.idMap);
   let nextGame = normalizeGameData({
     ...baseGame,
@@ -5678,6 +5689,7 @@ const applySimulationResult = async ({
     world: worldWithImpacts,
     relationUpdates: [...relationUpdates, ...espionageRelationUpdates],
     agreementUpdates,
+    puppetUpdates,
     events: freshEvents,
     stopDate: nextGame.gameDate,
     round: nextGame.round,
@@ -12168,6 +12180,7 @@ export const maybeGeneratePregameHistory = async () => {
     const bootstrapEvents = attachStorylineIdsByIndexes(generatedEvents, storylineUpdates);
     const warUpdates = bindWarUpdatesToEvents(decodeWarUpdates(payload?.warUpdates), bootstrapEvents);
     const relationUpdates = bindRelationUpdatesToEvents(decodeRelationUpdates(payload?.relationUpdates), bootstrapEvents);
+    const puppetUpdates = bindPuppetUpdatesToEvents(decodePuppetUpdates(payload?.puppetUpdates), bootstrapEvents);
     const agreementUpdates = bindAgreementUpdatesToEvents(decodeAgreementUpdates(payload?.agreementUpdates), bootstrapEvents);
     const warMerge = applyWarUpdates({
       world: currentWorld,
@@ -12180,6 +12193,7 @@ export const maybeGeneratePregameHistory = async () => {
       world: warMerge.world,
       relationUpdates,
       agreementUpdates,
+      puppetUpdates,
       events: bootstrapEvents,
       stopDate: startDate,
       round: 1,

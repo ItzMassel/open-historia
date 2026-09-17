@@ -4,7 +4,8 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { getNationFlags, getNationTags, loadRegionCatalog } from "../../runtime/assets.js";
 import { resolveCountryTags } from "../../runtime/countryTags.js";
-import { readEventsState, readWorldState } from "../../runtime/gameState.js";
+import { readEventsState, readGameData, readWorldState } from "../../runtime/gameState.js";
+import { visiblePuppetsFor } from "../../runtime/puppets.js";
 import { requestDiplomaticChat } from "../GameUI/chat.jsx";
 import GameFlagPicker from "../GameUI/GameFlagPicker.jsx";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
@@ -88,6 +89,7 @@ const CountryInfoPanel = () => {
     const [polityKey, setPolityKey] = useState("");
     const [displayName, setDisplayName] = useState("");
     const [flagPickerOpen, setFlagPickerOpen] = useState(false);
+    const [playerCountry, setPlayerCountry] = useState("");
 
     _openPanel = (next) => {
         setCountry(next);
@@ -106,14 +108,16 @@ const CountryInfoPanel = () => {
 
         (async () => {
             try {
-                const [allEvents, world, catalog, baseTags, flags] = await Promise.all([
+                const [allEvents, world, catalog, baseTags, flags, game] = await Promise.all([
                     readEventsState({ force: true }).catch(() => []),
                     readWorldState({ force: true }),
                     loadRegionCatalog().catch(() => []),
                     getNationTags().catch(() => ({})),
                     getNationFlags({ force: true }).catch(() => ({})),
+                    readGameData().catch(() => ({})),
                 ]);
                 if (cancelled) return;
+                setPlayerCountry(game?.country || "");
 
                 const identity = resolvePolityIdentity(
                     country.polityKey || country.name || country.code,
@@ -195,6 +199,46 @@ const CountryInfoPanel = () => {
             window.removeEventListener("oh:flags-updated", refresh);
         };
     }, [country]);
+
+    // What this viewer may see of this country's subordination, and nothing more.
+    // The answer comes from runtime/puppets.js because the map overlay, the
+    // diplomacy markers and the advisor's prompt all have to give the same one.
+    //
+    // A covert arrangement the player has not discovered renders NOTHING here -
+    // not a locked row, not a greyed-out line. A disabled control would announce
+    // the existence of the secret it is keeping.
+    const subordination = useMemo(() => {
+        const name = displayName || country?.name || "";
+        if (!worldState || !name) return null;
+        const rows = visiblePuppetsFor(worldState, playerCountry);
+        const row = rows.find((entry) => entry.puppet === name) || rows.find((entry) => entry.overlord === name && entry.role === "puppet");
+        if (!row || row.status !== "active") return null;
+
+        const asOf = row.asOf ? `, as of ${row.asOf}` : "";
+        const provenance = row.fromIntelligence ? `From intelligence${asOf}.` : "";
+
+        if (row.puppet === name && row.role === "overlord") {
+            return {
+                headline: `Our ${row.kind}`,
+                // A band, never a number: a visible score is a threshold to
+                // optimise against, and nothing in the engine enforces one.
+                detail: `${row.loyaltyBand} toward us${row.startedDate ? ` · since ${row.startedDate}` : ""} · ${row.secrecy === "covert" ? "arrangement is covert" : "openly known"}`,
+                provenance: "",
+            };
+        }
+        if (row.role === "puppet") {
+            return {
+                headline: `Our overlord`,
+                detail: `We are the ${row.kind} of ${row.overlord}${row.startedDate ? ` · since ${row.startedDate}` : ""}`,
+                provenance: "",
+            };
+        }
+        return {
+            headline: `${row.kind.charAt(0).toUpperCase()}${row.kind.slice(1)} of ${row.overlord}`,
+            detail: `${row.overlord} directs this country's affairs.`,
+            provenance,
+        };
+    }, [worldState, playerCountry, displayName, country]);
 
     const filteredEvents = useMemo(() => {
         const mode = FILTER_MODES[filterIndex].id;
@@ -313,6 +357,29 @@ const CountryInfoPanel = () => {
                 )}
                 </div>
             ))}
+            </div>
+        )}
+
+        {subordination && (
+            <div
+                style={{
+                    background: "rgba(234,179,8,0.1)",
+                    border: "1px solid rgba(234,179,8,0.35)",
+                    borderRadius: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.3rem",
+                    marginTop: "0.5rem",
+                    padding: "0.55rem 0.7rem",
+                }}
+            >
+                <div style={{ fontSize: "0.85rem", fontWeight: 800 }}>{subordination.headline}</div>
+                <div style={{ color: "rgba(255,255,255,0.68)", fontSize: "0.76rem" }}>{subordination.detail}</div>
+                {subordination.provenance && (
+                    <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", fontStyle: "italic" }}>
+                        {subordination.provenance}
+                    </div>
+                )}
             </div>
         )}
 
