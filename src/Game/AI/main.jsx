@@ -15,6 +15,7 @@ import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
+import { livePuppetsFor } from "../../runtime/puppets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import {
   buildDiplomaticTurnInstruction,
@@ -2609,6 +2610,36 @@ Example:
 [Current Projects & Operations]
 ${projectsSummary}`;
 
+// THE ADVISOR'S CONTRACT: it knows everything the player knows and nothing more.
+//
+// This is the first field in any prompt that is filtered by ACQUIRED KNOWLEDGE.
+// Two weaker forms already existed — whole-field omission (the advisor is simply
+// never handed storylines, spies or the Board) and filtering by PARTICIPATION
+// (chatVisibility.js gives each leader only the chats that polity was in, and
+// makes the advisor's filter a deliberate no-op because the player is in every
+// chat). Knowing whether a covert subordination has been DISCOVERED is neither:
+// it is state accumulated over time, and it can be out of date.
+//
+// It lives here, on the advisor alone, and NOT in the world summary — that
+// summary is read by twelve prompts including the jump and the leader, both of
+// which must see the truth instead (they get it from the canonical diplomatic
+// context). A player's-eye view reaching the simulator would have it resolving
+// the world from a picture it knows to be incomplete.
+const buildAdvisorPuppetsDirective = (world, playerCountry) => {
+    const rows = livePuppetsFor(world, playerCountry);
+    const lines = rows.slice(0, 40).map((row) => {
+        const who = row.role === "overlord"
+            ? `${row.puppet} is OUR ${row.kind} (loyalty: ${row.loyaltyBand.toLowerCase()})`
+            : row.role === "puppet" ? `WE are the ${row.kind} of ${row.overlord}`
+                : `${row.overlord} directs ${row.puppet} (${row.kind})`;
+        const source = row.fromIntelligence ? ` — from intelligence${row.asOf ? `, as of ${row.asOf}` : ""}` : "";
+        return `- ${who}${source}`;
+    });
+    return `[Subordinations You Know Of]
+A Puppet is a separate country holding its own territory and sovereignty, whose will is directed by another. What follows is the player's own intelligence picture: it may be incomplete, and anything marked "from intelligence" may be out of date. Never reason from a subordination that is not on this list, and never reveal a loyalty for a country that is not the player's own Puppet.
+${lines.length ? lines.join("\n") : "No country is known to direct another."}`;
+};
+
 async function buildAdvisorSystemPrompt() {
     await ensurePromptsLoaded();
     const [gameData, actionData, chatData, worldData, eventData, advisorData] = await Promise.all([
@@ -2642,6 +2673,7 @@ async function buildAdvisorSystemPrompt() {
         ADVISOR_DEPLOY_DIRECTIVE,
         buildAdvisorProjectsDirective(variables.projectsSummary),
         buildAdvisorForcesDirective(variables.forcePosture),
+        buildAdvisorPuppetsDirective(worldData, gameData?.country || ""),
         ADVISOR_FORMATTING_DIRECTIVE,
     ];
     return `${rendered}\n\n${directives.join("\n\n")}`;

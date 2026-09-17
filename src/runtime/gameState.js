@@ -2,7 +2,7 @@
 import { JSON_URLS, primeJson, readJson, reportPerfOperation, writeJson } from "./assets.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
-import { PUPPET_KINDS, PUPPET_SECRECIES, PUPPET_STATUSES } from "./puppets.js";
+import { MAX_PUPPETS as MAX_WORLD_PUPPETS, PUPPET_KINDS, PUPPET_SECRECIES, PUPPET_STATUSES } from "./puppets.js";
 import { displayNameMigrations, renamePolityInColors, renamePolityInWorld } from "../../server/polityRename.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
 import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
@@ -288,7 +288,7 @@ const MAX_WORLD_AGREEMENTS = 128;
 // Sized like the agreements ledger and for the same reason: every row rides the
 // simulator, advisor and chat prompts every turn. Ended rows are kept below the
 // cap on purpose — stale foreign knowledge depends on them surviving.
-const MAX_WORLD_PUPPETS = 64;
+
 
 const normalizeTextLike = (value) => {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {

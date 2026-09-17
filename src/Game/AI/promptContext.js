@@ -1,7 +1,6 @@
 import dayjs from "dayjs";
 import { JSON_URLS, getNationTags, loadRegionCatalog, readJson } from "../../runtime/assets.js";
 import { resolveAllCountryTags, resolveCountryTags } from "../../runtime/countryTags.js";
-import { livePuppetsFor } from "../../runtime/puppets.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
 import {
   buildActionDisplayText,
@@ -1555,25 +1554,6 @@ export const buildWorldSummary = async (bundle, regionCatalog = null, { regionLi
       + (taggedCodes.length > 40 ? `\n(+${taggedCodes.length - 40} more tagged countries not listed)` : "");
   const playerTags = resolveCountryTags(baseTags, world, bundle.game.country);
 
-  // Subordinations, FILTERED THROUGH WHAT THE PLAYER KNOWS. This summary feeds
-  // the advisor, whose whole contract is that it knows everything the player
-  // knows and nothing more — so a covert arrangement the player has not
-  // discovered must not reach it, and one they learned and that has since
-  // quietly lapsed reaches it exactly as they still believe it. The simulator
-  // and the chat task read the truth instead, from the canonical diplomatic
-  // context. Everything else in this summary is public fact; this is the one
-  // field that is not, which is why it goes through the shared resolver rather
-  // than reading the ledger directly here.
-  const knownPuppets = livePuppetsFor(world, bundle.game.country);
-  const puppetSummary = knownPuppets.length === 0
-    ? "No country is known to direct another."
-    : knownPuppets.slice(0, 40).map((row) => {
-      const who = row.role === "overlord"
-        ? `${row.puppet} is OUR ${row.kind} (loyalty: ${row.loyaltyBand.toLowerCase()})`
-        : row.role === "puppet" ? `WE are the ${row.kind} of ${row.overlord}`
-          : `${row.overlord} directs ${row.puppet} (${row.kind})`;
-      return `- ${who}${row.fromIntelligence ? ` — from intelligence${row.asOf ? `, as of ${row.asOf}` : ""}` : ""}`;
-    }).join("\n");
 
   // The region vocabulary the jump prompt promises ("every ... region ... separated
   // by a comma ... ANALYZE THIS INCREDIBLY CAREFULLY"). Until now nothing filled it,
@@ -1628,12 +1608,6 @@ export const buildWorldSummary = async (bundle, regionCatalog = null, { regionLi
     "",
     "Dynamic polity overrides:",
     politySummary,
-    "",
-    "Subordinations the player knows of. A Puppet is a separate country holding "
-      + "its own territory and sovereignty, whose will is directed by another. This "
-      + "list is the player's own picture and may be incomplete or out of date; never "
-      + "reason from a subordination that is not on it.",
-    puppetSummary,
     "",
     "What each country is (ideology, alignment, posture). Treat these as binding "
       + "characterisation: act, speak and react in keeping with them, and only change "

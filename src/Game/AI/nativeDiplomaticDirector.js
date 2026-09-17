@@ -1319,7 +1319,9 @@ const PUPPET_OP_SET = new Set(PUPPET_OP_VALUES);
 const PUPPET_ENDING_OPS = new Set(["release", "annex", "revolt"]);
 const PUPPET_KIND_SET = new Set(["protectorate", "satellite", "client"]);
 const MAX_PUPPET_UPDATES_PER_PASS = 24;
-const MAX_PUPPETS = 64;
+// How many subordinations the bounded prompt slice may carry. Its own bound:
+// borrowing the agreements cap made the number lie about what it limited.
+const MAX_CONTEXT_PUPPETS = 24;
 
 // The ONE deterministic engine rule on Loyalty. Everything else — mistreatment,
 // a good decade, a humiliation — is the model's judgement, moved by a `loyalty`
@@ -1451,8 +1453,18 @@ export const applyPuppetUpdates = ({
       continue;
     }
 
-    const overlord = canonicalDiplomaticPolity(update.overlord, nextWorld);
+    const namedOverlord = canonicalDiplomaticPolity(update.overlord, nextWorld);
     const puppet = canonicalDiplomaticPolity(update.puppet, nextWorld);
+    // NO CHAINS, from either direction. Reparenting below handles the case where
+    // the new Puppet already holds Puppets; this handles the mirror image, where
+    // the new OVERLORD is itself held. A satellite that subjugates its neighbour
+    // does not acquire a Puppet of its own — the neighbour answers to whoever
+    // answers for the satellite, directly. Only `install` may redirect: the other
+    // verbs must act on the row exactly as it stands.
+    const heldOverlord = update.op === "install" ? livePuppetByPuppet(rows, namedOverlord) : null;
+    const overlord = heldOverlord && lower(heldOverlord.overlord) !== lower(puppet)
+      ? heldOverlord.overlord
+      : namedOverlord;
     if (!overlord || !puppet || lower(overlord) === lower(puppet)) {
       console.warn(`[OH puppets] dropped ${update.op}: could not resolve both polities, or they are the same.`);
       continue;
@@ -1470,8 +1482,6 @@ export const applyPuppetUpdates = ({
         console.warn(`[OH puppets] refused install: ${puppet} is already held by ${heldByAnother.overlord}.`);
         continue;
       }
-      // Chains are banned, so the only cycle possible is of length two — and it
-      // is the one a model reaches for when a war turns around.
       if (livePuppetRow(rows, puppet, overlord)) {
         console.warn(`[OH puppets] refused install: ${overlord} is already a Puppet of ${puppet}.`);
         continue;
@@ -1576,7 +1586,11 @@ export const applyPuppetUpdates = ({
     refusedDemandCount += 1;
   }
 
-  const merged = normalizeWorldState({ ...nextWorld, puppets: rows.slice(0, MAX_PUPPETS) });
+  // Handed over WHOLE: normalizeWorldPuppets evicts finished rows before live
+  // ones. Truncating here would drop whatever happened to be last, and a new
+  // install is pushed to the end — so a full ledger would silently swallow the
+  // subordination this very turn created.
+  const merged = normalizeWorldState({ ...nextWorld, puppets: rows });
   return { world: merged, puppets: merged.puppets, appliedIds: applied, refusedDemandCount };
 };
 
@@ -1728,7 +1742,7 @@ export const buildBoundedDiplomaticContext = (
   const puppets = array(world.puppets)
     .filter((row) => row.status === "active")
     .filter((row) => actorKeys.has(politySetKey(row.overlord)) || actorKeys.has(politySetKey(row.puppet)))
-    .slice(0, MAX_CONTEXT_AGREEMENTS);
+    .slice(0, MAX_CONTEXT_PUPPETS);
 
   const text = [
     `[Canonical Diplomatic State v${DIPLOMATIC_DIRECTOR_VERSION} — bounded relevant slice]`,

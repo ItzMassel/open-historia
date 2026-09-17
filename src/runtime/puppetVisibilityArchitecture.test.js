@@ -22,7 +22,7 @@ const SURFACES = [
     ["the country panel", "../Game/Selection/CountryPanel.jsx"],
     ["the diplomacy markers", "../Game/GameUI/chat.jsx"],
     ["the map overlay", "../Game/Map/Nations.jsx"],
-    ["the advisor's world summary", "../Game/AI/promptContext.js"],
+    ["the advisor's own directive", "../Game/AI/main.jsx"],
 ];
 
 test("every player-facing surface asks the shared resolver", () => {
@@ -59,9 +59,16 @@ test("Loyalty never reaches a surface as a bare number", () => {
     assert.doesNotMatch(read("../Game/Selection/CountryPanel.jsx"), /row\.loyalty\b(?!Band)/);
 });
 
-test("the advisor's puppet section is filtered by the player, not handed the world", () => {
+test("the advisor's puppet section is filtered by the player", () => {
+    assert.match(read("../Game/AI/main.jsx"), /buildAdvisorPuppetsDirective\(worldData, gameData\?\.country/);
+});
+
+test("the shared world summary carries no subordinations at all", () => {
+    // It is read by twelve prompts, the jump and the leader among them, and both
+    // of those must see the truth rather than the player's picture. Filtering
+    // belongs on the advisor alone.
     const source = read("../Game/AI/promptContext.js");
-    assert.match(source, /livePuppetsFor\(world, bundle\.game\.country\)/);
+    assert.doesNotMatch(source, /livePuppetsFor|visiblePuppetsFor|puppetSummary/);
 });
 
 test("the simulator and chat read the truth instead, from the canonical ledger context", () => {

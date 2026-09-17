@@ -208,3 +208,32 @@ test("an unknown verb is dropped rather than guessed at", () => {
   assert.equal(world.puppets[0].status, "active");
   assert.equal(world.puppets[0].loyalty, 40);
 });
+
+// Regressions found in review.
+
+test("a chain cannot be built from the top down either", () => {
+  let world = apply(baseWorld, "install~USSR~Germany~satellite~40~open~1~Berlin falls").world;
+  world = apply(world, "install~Germany~Slovakia~client~60~open~1~Germany takes a client").world;
+
+  const live = world.puppets.filter((row) => row.status === "active");
+  assert.equal(live.length, 2);
+  const slovakia = live.find((row) => row.puppet === "Slovakia");
+  assert.equal(slovakia.overlord, "USSR", "a Puppet cannot hold a Puppet - it attaches to the real Overlord");
+  assert.ok(!live.some((row) => row.overlord === "Germany"), "Germany holds nobody while it is itself held");
+});
+
+test("a full ledger evicts what is over, never the install that just arrived", () => {
+  const ended = Array.from({ length: 64 }, (_, index) => ({
+    id: `done-${index}`,
+    overlord: "USSR",
+    puppet: `Gone ${index}`,
+    status: "released",
+    lastUpdatedDate: `19${String(10 + index).padStart(2, "0")}-01-01`,
+  }));
+  const full = { ...baseWorld, puppets: ended };
+
+  const { world } = apply(full, "install~USSR~Poland~satellite~40~open~1~Seated");
+  const live = world.puppets.filter((row) => row.status === "active");
+  assert.equal(live.length, 1, "the new subordination survives a full ledger");
+  assert.equal(live[0].puppet, "Poland");
+});
