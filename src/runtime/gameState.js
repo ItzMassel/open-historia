@@ -2,7 +2,7 @@
 import { JSON_URLS, primeJson, readJson, reportPerfOperation, writeJson } from "./assets.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
-import { MAX_PUPPETS as MAX_WORLD_PUPPETS, PUPPET_KINDS, PUPPET_SECRECIES, PUPPET_STATUSES } from "./puppets.js";
+import { MAX_PUPPETS as MAX_WORLD_PUPPETS, PUPPET_KINDS, PUPPET_SECRECY_LEVELS, PUPPET_STATUSES } from "./puppets.js";
 import { displayNameMigrations, renamePolityInColors, renamePolityInWorld } from "../../server/polityRename.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
 import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
@@ -120,6 +120,15 @@ export const WORLD_DEFAULTS = {
   // was shown. Keeps a leader from being handed the same exchange twice, and a
   // long campaign from growing the chat prompt without bound.
   chatKnowledgeCursors: {},
+  // Refusals of an Overlord's demand the engine has already charged, by the id of
+  // the message that carried them (chargeRefusals). It lives HERE, and not as a
+  // stamp on the message, because of who writes what: every writer of the world
+  // re-reads it at write time, while chats are written from whatever copy each
+  // panel happens to hold — so a stamp on a message was erased by the next save
+  // from a stale panel, and the refusal charged again on every jump after.
+  // Written only by the turn, so it rides the turn's restore point like the
+  // puppet ledger it pays into. Never sent to a model.
+  chargedRefusals: [],
   // Real-time grace-period queue for optional Event Editor -> NPC diplomatic
   // reactions. Pending evaluations only, never chats: the conversation itself
   // is created later through the normal chat merge seam.
@@ -569,7 +578,6 @@ const normalizeChatMessage = (message, index = 0) => {
       memorySummary: "",
       refusedOverlord: "",
       refusedPuppet: "",
-      refusalChargedRound: 0,
     };
   }
 
@@ -600,21 +608,21 @@ const normalizeChatMessage = (message, index = 0) => {
     // chat text, it lets long negotiations stay bounded without forgetting
     // agreements, threats or unresolved proposals (promptContext reads the latest).
     memorySummary: normalizeOptionalString(message.memorySummary || message.diplomaticMemorySummary),
-    // The Overlord whose demand this speaker refused, off the reply's hidden
-    // REFUSED_DEMAND line (diplomaticEnvelope.js). It has to survive the round
-    // trip: the next jump reads refusals back off the SAVED transcript to charge
-    // the one deterministic Loyalty cost, and a field this normalizer does not
-    // know is a field the next write silently drops — which is exactly how that
-    // rule spent two commits looking wired up while never once firing.
-    refusedOverlord: normalizeOptionalString(message.refusedOverlord),
-    refusedPuppet: normalizeOptionalString(message.refusedPuppet),
-    // The round that already charged this refusal. Dates alone cannot answer
-    // "has this been counted?" - a jump that failed part-way and was retried, or
-    // a save reloaded and jumped again, lands on the SAME game date and would
-    // charge the same refusal twice. 0 means never charged.
-    refusalChargedRound: Number.isFinite(Number(message.refusalChargedRound))
-      ? Math.max(0, Math.trunc(Number(message.refusalChargedRound)))
-      : 0,
+    // A refusal of an Overlord's demand, off the reply's hidden REFUSED_DEMAND
+    // line (diplomaticEnvelope.js) or a group turn's send_message. Both parties
+    // are named on the message itself, never taken from who spoke: an AI Puppet
+    // marks its own refusal, and an Overlord marks the reply answering the
+    // PLAYER's, whose typed message carries no envelope. Both or neither — a
+    // single name cannot be charged to anyone. It has to survive the round trip,
+    // because the next jump reads refusals back off the SAVED transcript; a field
+    // this normalizer does not know is one the next write silently drops.
+    ...(() => {
+      const overlord = normalizeOptionalString(message.refusedOverlord);
+      const puppet = normalizeOptionalString(message.refusedPuppet);
+      return overlord && puppet
+        ? { refusedOverlord: overlord, refusedPuppet: puppet }
+        : { refusedOverlord: "", refusedPuppet: "" };
+    })(),
     text,
     time: normalizeOptionalString(message.time || message.date),
     ...(eventId ? { eventId } : {}),
@@ -694,42 +702,34 @@ export const normalizeChatEntry = (entry, index = 0) => {
 };
 
 // THE ONE DETERMINISTIC LOYALTY RULE's intake: every refusal of an Overlord's
-// demand not yet charged, and the chats with each of them stamped as charged in
-// this round. Pure — the caller writes the returned chats back.
+// demand the engine has not yet charged, and the charged record with them added.
+// Pure, and it never touches a chat.
 //
-// Charged ONCE, and not by date: a jump that failed part-way and was retried, or
-// a save reloaded and jumped again, lands on the same game date. So each refusal
-// records the round that counted it.
+// Charged ONCE, keyed by the id of the message that carried it — not by date,
+// because a retried jump or a reloaded save lands on the same date twice. The
+// record is world.chargedRefusals rather than a stamp on the message, because a
+// stamp on a message was erased by the next save from any chat panel holding an
+// older copy, and the refusal was then charged on every jump after. Every world
+// writer re-reads before it writes; chat writers do not.
 //
-// The stamp goes on the message AND on the thread-log event it came from
-// (chatThreads.js). A logged thread's messages are rebuilt from its log on every
-// load, and a message already in the log is not folded in again — so a stamp on
-// the message alone is thrown away on the next save, and the refusal is charged
-// on every jump after. Both parties come off the message, never from who spoke:
-// an AI Puppet marks its own refusal, and an Overlord marks the reply that
-// answers the PLAYER's.
-export const chargeRefusals = (chats, round) => {
-  const stamp = Math.max(1, Math.trunc(Number(round) || 0));
+// Both parties come off the message, never from who spoke: an AI Puppet marks
+// its own refusal, and an Overlord marks the reply answering the PLAYER's.
+export const chargeRefusals = (chats, charged = []) => {
+  const seen = new Set(normalizeArray(charged).map((id) => String(id)));
   const refusedDemands = [];
-  const next = normalizeArray(chats).map((chat) => {
-    const charged = new Set();
-    const messages = normalizeArray(chat?.messages).map((message) => {
+  const newlyCharged = [];
+  for (const chat of normalizeArray(chats)) {
+    for (const message of normalizeArray(chat?.messages)) {
       const overlord = normalizeOptionalString(message?.refusedOverlord);
       const puppet = normalizeOptionalString(message?.refusedPuppet);
-      if (!overlord || !puppet || Number(message?.refusalChargedRound) > 0) return message;
+      const id = normalizeOptionalString(message?.id);
+      if (!overlord || !puppet || !id || seen.has(id)) continue;
+      seen.add(id);
+      newlyCharged.push(id);
       refusedDemands.push({ overlord, puppet });
-      if (message?.id) charged.add(String(message.id));
-      return { ...message, refusalChargedRound: stamp };
-    });
-    if (!charged.size && messages.every((message, index) => message === normalizeArray(chat?.messages)[index])) return chat;
-    const events = Array.isArray(chat?.events)
-      ? chat.events.map((event) => (event?.kind === "message" && charged.has(String(event.id))
-        ? { ...event, refusalChargedRound: stamp }
-        : event))
-      : chat?.events;
-    return { ...chat, messages, ...(events ? { events } : {}) };
-  });
-  return { refusedDemands, chats: next };
+    }
+  }
+  return { refusedDemands, charged: [...normalizeArray(charged), ...newlyCharged] };
 };
 
 export const normalizeChats = (chats) =>
@@ -3382,7 +3382,14 @@ const normalizeWorldPuppet = (entry, identityWorld, index = 0) => {
     const key = polity.toLocaleLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    knownTo.push({ polity, learnedDate: typeof raw === "string" ? "" : canonicalizeDateString(raw?.learnedDate) });
+    const lastSeen = typeof raw === "string" ? "" : normalizeOptionalString(raw?.seenStatus).toLowerCase();
+    knownTo.push({
+      polity,
+      learnedDate: typeof raw === "string" ? "" : canonicalizeDateString(raw?.learnedDate),
+      // The status this polity last SAW. Absent means it saw the arrangement
+      // standing — the only thing it could have learned of it by being told.
+      ...(PUPPET_STATUSES.includes(lastSeen) ? { seenStatus: lastSeen } : {}),
+    });
     if (knownTo.length >= 24) break;
   }
 
@@ -3392,7 +3399,7 @@ const normalizeWorldPuppet = (entry, identityWorld, index = 0) => {
     puppet,
     kind: PUPPET_KINDS.includes(kind) ? kind : "client",
     loyalty: Number.isFinite(loyaltyNumber) ? Math.max(0, Math.min(100, Math.round(loyaltyNumber))) : 50,
-    secrecy: PUPPET_SECRECIES.includes(secrecy) ? secrecy : "open",
+    secrecy: PUPPET_SECRECY_LEVELS.includes(secrecy) ? secrecy : "open",
     knownTo,
     status,
     startedDate: canonicalizeDateString(entry.startedDate),
@@ -3636,6 +3643,11 @@ export const normalizeWorldState = (world) => {
       }
       return cursors;
     })(),
+    // Capped at the most recent 512: a refusal is rare, and past that many the
+    // oldest could be charged again — a campaign would need five hundred refused
+    // demands for that to matter, and a list that grew forever would matter sooner.
+    chargedRefusals: [...new Set(normalizeArray(nextWorld.chargedRefusals).map((id) => normalizeOptionalString(id)).filter(Boolean))]
+      .slice(-512),
     pendingEventOutreach: normalizePendingEventOutreach(nextWorld.pendingEventOutreach),
     // Explicit (not via the ...WORLD_DEFAULTS spread) so these new fields survive every
     // write path — the documented new-world-field trap.

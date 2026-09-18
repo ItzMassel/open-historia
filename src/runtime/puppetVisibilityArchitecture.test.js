@@ -71,10 +71,37 @@ test("the shared world summary carries no subordinations at all", () => {
     assert.doesNotMatch(source, /livePuppetsFor|visiblePuppetsFor|puppetSummary/);
 });
 
-test("the simulator and chat read the truth instead, from the canonical ledger context", () => {
-    // The advisor is filtered; the jump and the chat task are NOT. A covert
-    // Puppet talking to a third party has to know which way to lie.
+test("the simulator reads the whole ledger from the canonical context", () => {
+    // The jump is the narrator: it resolves the whole world, so it is given the
+    // truth, covert arrangements included.
     const director = read("../Game/AI/nativeDiplomaticDirector.js");
     assert.match(director, /SUBORDINATIONS \(who directs whom\)/);
     assert.doesNotMatch(director, /livePuppetsFor|visiblePuppetsFor/);
+});
+
+// This test used to be named "the simulator and chat read the truth", and only
+// checked that the ledger CONTAINED the subordinations section — never that the
+// chat prompts RECEIVED it. They did not: the section reaches the jump, the idle
+// pass and next-speaker, and never the leader or the group turn. So a covert
+// Puppet in conversation did not know it was one, and could neither lie about
+// it nor mark a refusal of its own Overlord. The assertions below are about the
+// prompts themselves, not the ledger.
+
+test("a one-on-one leader is briefed, as its own country knows it", () => {
+    const source = read("../Game/AI/main.jsx");
+    assert.match(source, /puppetBriefingFor\(worldData, speaker/);
+    assert.match(source, /\$\{subordinations \?/, "and the briefing reaches the returned prompt");
+});
+
+test("the one-on-one briefing counts the player as present", () => {
+    // A chat's countries list only its non-player members. Leave the player out
+    // and a covert Puppet talking to them counts nobody as unaware.
+    assert.match(read("../Game/AI/main.jsx"), /present: \[\.\.\.countries, playerCountry \|\| gameData\?\.country\]/);
+});
+
+test("every AI participant in a group turn is briefed, the player in the room", () => {
+    const source = read("../Game/AI/gameplay.js");
+    assert.match(source, /puppetBriefingFor\(briefingWorld, speaker, \{ present: inTheRoom \}\)/);
+    assert.match(source, /const inTheRoom = \[\.\.\.aiParticipants, player\]/);
+    assert.match(source, /\[crossChatKnowledge, subordinationKnowledge\]/, "and it reaches the group prompt");
 });

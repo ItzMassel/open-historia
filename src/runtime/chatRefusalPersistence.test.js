@@ -3,12 +3,13 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chargeRefusals, normalizeChats } from "./gameState.js";
+import { chargeRefusals, normalizeChats, normalizeWorldState } from "./gameState.js";
 
 // The one deterministic Loyalty rule reads refusals back off the SAVED
-// transcript a turn later, so the flag has to survive the round trip. It did not
-// for two commits: normalizeChatMessage returns a fixed object, so every write
-// quietly dropped the field and the rule never fired once.
+// transcript a turn later, so the refusal has to survive every way a chat is
+// written and read. It has died three ways already: normalizeChatMessage
+// dropping the field, the thread log dropping it, and a "charged" stamp on the
+// message being erased by a chat panel saving its older copy. These pin all three.
 
 const chatWith = (message) => [{
   id: "c1",
@@ -16,52 +17,9 @@ const chatWith = (message) => [{
   messages: [message],
 }];
 
-test("a refusal survives being written and read back", () => {
-  const [chat] = normalizeChats(chatWith({
-    role: "leader",
-    speaker: "Poland",
-    text: "Warsaw will not send divisions east.",
-    time: "1952-03-04",
-    refusedOverlord: "USSR",
-    refusedPuppet: "Poland",
-  }));
-  assert.equal(chat.messages[0].refusedOverlord, "USSR");
-  assert.equal(chat.messages[0].refusedPuppet, "Poland");
-  assert.equal(chat.messages[0].refusalChargedRound, 0, "not counted yet");
-});
-
-test("an ordinary message carries an empty refusal rather than none at all", () => {
-  const [chat] = normalizeChats(chatWith({ role: "leader", speaker: "Poland", text: "We will consider it." }));
-  assert.equal(chat.messages[0].refusedOverlord, "");
-});
-
-test("a message stored as a bare string has the same shape as any other", () => {
-  const [chat] = normalizeChats(chatWith("A note from the archives."));
-  assert.deepEqual(Object.keys(chat.messages[0]).sort(), Object.keys(
-    normalizeChats(chatWith({ role: "leader", speaker: "Poland", text: "x" }))[0].messages[0],
-  ).sort());
-});
-
-test("a refusal already charged remembers the round that charged it", () => {
-  // Dates cannot answer "has this been counted?" - a retried jump lands on the
-  // same game date, and without the stamp the same refusal costs Loyalty twice.
-  const [chat] = normalizeChats(chatWith({
-    role: "leader",
-    speaker: "Poland",
-    text: "No.",
-    time: "1952-03-04",
-    refusedOverlord: "USSR",
-    refusedPuppet: "Poland",
-    refusalChargedRound: 7,
-  }));
-  assert.equal(chat.messages[0].refusalChargedRound, 7);
-});
-
-// Threads grew an EVENT LOG on beta (chatThreads.js), and a thread with one has
-// its messages REBUILT from the log's projection — which carries only the fields
-// it knows. The fixtures above have no log, so they never exercised that path.
-// This is the same drop the normalizer made before, one layer further down.
-
+// Threads grew an EVENT LOG on beta (chatThreads.js). A logged thread has its
+// messages rebuilt from the log's projection, which carries only the fields it
+// lists — the path the unlogged fixture above never exercises.
 const loggedThread = (extraMessage) => ({
   id: "t1",
   countries: [{ code: "POL", name: "Poland" }],
@@ -72,74 +30,88 @@ const loggedThread = (extraMessage) => ({
   messages: [extraMessage],
 });
 
+const refusal = (extra = {}) => ({
+  id: "m1",
+  role: "leader",
+  speaker: "Poland",
+  text: "Warsaw will not send divisions east.",
+  time: "1952-03-04",
+  refusedOverlord: "USSR",
+  refusedPuppet: "Poland",
+  ...extra,
+});
+
+test("a refusal survives being written and read back", () => {
+  const [chat] = normalizeChats(chatWith(refusal()));
+  assert.equal(chat.messages[0].refusedOverlord, "USSR");
+  assert.equal(chat.messages[0].refusedPuppet, "Poland");
+});
+
 test("a refusal survives a thread that keeps an event log", () => {
-  const [chat] = normalizeChats([loggedThread({
-    id: "m1",
-    role: "leader",
-    speaker: "Poland",
-    text: "Warsaw will not send divisions east.",
-    time: "1952-03-04",
-    refusedOverlord: "USSR",
-    refusedPuppet: "Poland",
-  })]);
+  const [chat] = normalizeChats([loggedThread(refusal())]);
   assert.ok(Array.isArray(chat.events) && chat.events.length > 0, "the thread really is logged");
   const message = chat.messages.find((entry) => entry.text.startsWith("Warsaw"));
   assert.equal(message.refusedOverlord, "USSR");
   assert.equal(message.refusedPuppet, "Poland");
 });
 
-test("the charge stamp survives a logged thread too, or a retried jump re-charges", () => {
-  const once = normalizeChats([loggedThread({
-    id: "m1",
-    role: "leader",
-    speaker: "Poland",
-    text: "No.",
-    time: "1952-03-04",
-    refusedOverlord: "USSR",
-    refusedPuppet: "Poland",
-    refusalChargedRound: 7,
-  })]);
-  // Read back what was written, the way the next load does.
-  const [again] = normalizeChats(once);
-  const message = again.messages.find((entry) => entry.text === "No.");
-  assert.equal(message.refusalChargedRound, 7);
+test("half a refusal is no refusal", () => {
+  const [chat] = normalizeChats(chatWith(refusal({ refusedPuppet: "" })));
+  assert.equal(chat.messages[0].refusedOverlord, "");
+  assert.equal(chat.messages[0].refusedPuppet, "");
 });
 
-// The turn's own flow, which the fixtures above only approximate: the refusal is
-// ALREADY in the thread's log when the jump charges it. Stamping the projected
-// message alone is not enough there — on save the log's unstamped copy wins, the
-// projection is rebuilt from it, and the next jump charges the same refusal again.
+test("an ordinary message carries an empty refusal rather than none at all", () => {
+  const [chat] = normalizeChats(chatWith({ role: "leader", speaker: "Poland", text: "We will consider it." }));
+  assert.equal(chat.messages[0].refusedOverlord, "");
+  assert.equal(chat.messages[0].refusedPuppet, "");
+});
 
-test("charging a logged refusal stamps it for good, and it is never charged twice", () => {
-  const [logged] = normalizeChats([loggedThread({
-    id: "m1", role: "leader", speaker: "Poland", text: "No.", time: "1952-03-04",
-    refusedOverlord: "USSR", refusedPuppet: "Poland",
-  })]);
+test("a message stored as a bare string has the same shape as any other", () => {
+  const [chat] = normalizeChats(chatWith("A note from the archives."));
+  assert.deepEqual(Object.keys(chat.messages[0]).sort(), Object.keys(
+    normalizeChats(chatWith({ role: "leader", speaker: "Poland", text: "x" }))[0].messages[0],
+  ).sort());
+});
 
-  const first = chargeRefusals([logged], 5);
+test("a refusal is charged once, however many times the turn runs", () => {
+  const chats = normalizeChats([loggedThread(refusal())]);
+
+  const first = chargeRefusals(chats, []);
   assert.deepEqual(first.refusedDemands, [{ overlord: "USSR", puppet: "Poland" }]);
 
-  // Saved and loaded, as the next jump would find it.
-  const reloaded = normalizeChats(first.chats);
-  const second = chargeRefusals(reloaded, 6);
-  assert.deepEqual(second.refusedDemands, [], "already charged in round 5");
-  assert.equal(reloaded[0].messages.find((entry) => entry.text === "No.").refusalChargedRound, 5);
+  // A retried jump, or a reloaded save jumped again: same chats, same record.
+  const second = chargeRefusals(chats, first.charged);
+  assert.deepEqual(second.refusedDemands, [], "already charged");
+  assert.deepEqual(second.charged, first.charged);
 });
 
-test("an uncharged refusal in an unlogged thread is charged too", () => {
-  const { refusedDemands } = chargeRefusals(normalizeChats(chatWith({
-    role: "leader", speaker: "Poland", text: "No.", time: "1952-03-04",
-    refusedOverlord: "USSR", refusedPuppet: "Poland",
-  })), 5);
-  assert.deepEqual(refusedDemands, [{ overlord: "USSR", puppet: "Poland" }]);
+test("a stale chat panel saving over the transcript cannot un-charge a refusal", () => {
+  // The reason the record is not on the message: the panel re-saves the copy it
+  // holds, which never saw the charge. The record in the world is untouched.
+  const charged = chargeRefusals(normalizeChats([loggedThread(refusal())]), []).charged;
+  const panelSavesItsOldCopy = normalizeChats([loggedThread(refusal())]);
+  assert.deepEqual(chargeRefusals(panelSavesItsOldCopy, charged).refusedDemands, []);
+});
+
+test("the charge record survives the world's round trip, and is capped", () => {
+  const world = normalizeWorldState({ chargedRefusals: ["m1", "m2", "m1", "", null] });
+  assert.deepEqual(world.chargedRefusals, ["m1", "m2"]);
+
+  const many = Array.from({ length: 600 }, (_, index) => `m${index}`);
+  const capped = normalizeWorldState({ chargedRefusals: many }).chargedRefusals;
+  assert.equal(capped.length, 512);
+  assert.equal(capped.at(-1), "m599", "the most recent are the ones kept");
 });
 
 test("charging does not touch the chats it was given", () => {
-  const chats = normalizeChats([loggedThread({
-    id: "m1", role: "leader", speaker: "Poland", text: "No.", time: "1952-03-04",
-    refusedOverlord: "USSR", refusedPuppet: "Poland",
-  })]);
+  const chats = normalizeChats([loggedThread(refusal())]);
   const before = JSON.stringify(chats);
-  chargeRefusals(chats, 5);
+  chargeRefusals(chats, []);
   assert.equal(JSON.stringify(chats), before);
+});
+
+test("an unlogged thread's refusal is charged too", () => {
+  assert.deepEqual(chargeRefusals(normalizeChats(chatWith(refusal())), []).refusedDemands,
+    [{ overlord: "USSR", puppet: "Poland" }]);
 });

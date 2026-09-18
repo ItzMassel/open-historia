@@ -31,7 +31,7 @@ import { fetchCommunityFlags, loadCommunityFlagDataUrl } from "../../runtime/com
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { readChatsState, writeChatsState, readGameData, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld, viewAsSeen } from "../../runtime/gameState.js";
-import { describeRole, visiblePuppetsFor } from "../../runtime/puppets.js";
+import { describeRole, livePuppetsFor } from "../../runtime/puppets.js";
 import { buildThreadCatchUp } from "../AI/conversationCatchUp.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
@@ -1661,8 +1661,7 @@ const usePuppetMarkers = () => {
                 ]);
                 if (cancelled) return;
                 const next = {};
-                for (const row of visiblePuppetsFor(world, game?.country || "")) {
-                    if (row.status !== "active") continue;
+                for (const row of livePuppetsFor(world, game?.country || "")) {
                     describeRole(row, {
                         puppet: () => { next[row.overlord] = "YOUR OVERLORD"; },
                         overlord: () => { next[row.puppet] = `YOUR ${row.kind.toUpperCase()}`; },

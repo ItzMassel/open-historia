@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { livePuppetsFor, loyaltyBand, visiblePuppetsFor } from "./puppets.js";
+import { describePuppetBriefing, livePuppetsFor, loyaltyBand, puppetBriefingFor, visiblePuppetsFor } from "./puppets.js";
 
 // One field, different rows per viewer - the same problem chatVisibility.js
 // solves for transcripts. What separates the two: a chat filters on
@@ -154,4 +154,71 @@ test("a band is still withheld from everyone but the Overlord", () => {
   for (const viewer of ["Poland", "France"]) {
     assert.equal(visiblePuppetsFor(world([raw]), viewer)[0].loyaltyBand, null);
   }
+});
+
+// A LEADER speaks as one polity, so it is briefed on what that polity knows —
+// the same rule chatVisibility.js applies to transcripts — and not on the whole
+// ledger: handing every leader every covert arrangement would let France's
+// leader "know" a deal France never discovered. For its OWN covert arrangements
+// it is also told who in the room does not know, because that is the thing it
+// needs to know which way to lie.
+
+test("a Puppet is briefed on its own subordination, and on who in the room must not learn it", () => {
+  const briefing = puppetBriefingFor(world([covertClient]), "Finland", { present: ["Finland", "France", "United Kingdom"] });
+  assert.equal(briefing.own.length, 1);
+  const [own] = briefing.own;
+  assert.equal(own.role, "puppet");
+  assert.equal(own.counterpart, "USSR");
+  assert.equal(own.secrecy, "covert");
+  assert.deepEqual(own.unawareHere, ["France"], "the UK has found out; France has not");
+  assert.equal(own.loyaltyBand, null, "a Puppet is not told its own Loyalty");
+});
+
+test("an Overlord is briefed on its Puppet's mood", () => {
+  const [own] = puppetBriefingFor(world([openSatellite]), "USSR", { present: ["USSR", "Poland"] }).own;
+  assert.equal(own.role, "overlord");
+  assert.equal(own.counterpart, "Poland");
+  assert.equal(own.loyaltyBand, "Restless");
+  assert.deepEqual(own.unawareHere, [], "an open arrangement has nobody to hide it from");
+});
+
+test("a leader is not briefed on a covert arrangement its country never discovered", () => {
+  const briefing = puppetBriefingFor(world([covertClient]), "France", { present: ["France", "Finland"] });
+  assert.deepEqual(briefing.own, []);
+  assert.deepEqual(briefing.learned, []);
+});
+
+test("a leader IS briefed on one its services uncovered, with when", () => {
+  const { learned } = puppetBriefingFor(world([covertClient]), "United Kingdom", { present: [] });
+  assert.equal(learned.length, 1);
+  assert.equal(learned[0].puppet, "Finland");
+  assert.equal(learned[0].asOf, "1948-03-02");
+});
+
+test("the briefing renders a line the model can act on, and nothing when there is nothing", () => {
+  const text = describePuppetBriefing(puppetBriefingFor(world([covertClient]), "Finland", { present: ["Finland", "France"] }), "Finland");
+  assert.match(text, /client of USSR/i);
+  assert.match(text, /France does not know/);
+  assert.match(text, /independent/i);
+  assert.equal(describePuppetBriefing(puppetBriefingFor(world([]), "France"), "France"), "");
+});
+
+test("the room may be given as chat country entries, and the player counts as present", () => {
+  // A chat's countries are { name, code } entries and list only its NON-player
+  // members, so the caller adds the player — who is exactly who a covert Puppet
+  // most needs to deceive.
+  const [own] = puppetBriefingFor(world([covertClient]), "Finland", {
+    present: [{ name: "Finland", code: "FIN" }, "France", "France", null],
+  }).own;
+  assert.deepEqual(own.unawareHere, ["France"]);
+});
+
+test("a viewer sees an arrangement as they last saw it, ended or not", () => {
+  // knownTo records what each polity last saw. An agent still in place brings it
+  // up to date; without one, the old belief stands.
+  const ended = { ...covertClient, status: "released", endedDate: "1953-04-10" };
+  const refreshed = { ...ended, knownTo: [{ polity: "United Kingdom", learnedDate: "1953-06-01", seenStatus: "released" }] };
+  const stale = { ...ended, knownTo: [{ polity: "United Kingdom", learnedDate: "1948-03-02", seenStatus: "active" }] };
+  assert.equal(visiblePuppetsFor(world([refreshed]), "United Kingdom")[0].status, "released");
+  assert.equal(visiblePuppetsFor(world([stale]), "United Kingdom")[0].status, "active");
 });

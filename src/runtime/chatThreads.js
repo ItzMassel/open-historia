@@ -41,23 +41,21 @@ export const POLL_LABEL_MAX_CHARS = 120;
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const asText = (value) => String(value ?? "").trim();
+const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const fold = (value) => asText(value).toLowerCase();
 
-// A refusal of an Overlord's demand (diplomaticEnvelope.js REFUSED_DEMAND), and
-// the round that already charged it. Carried through every place this file lists
-// a message's fields — recording, migrating, folding in and projecting — because
-// a field left off any one of them is silently dropped on the next save, and the
-// one deterministic Loyalty rule has died exactly that way twice already.
+// A refusal of an Overlord's demand (diplomaticEnvelope.js REFUSED_DEMAND, or a
+// group turn's send_message). Carried through every place this file lists a
+// message's fields — recording, migrating, folding in and projecting — because a
+// field left off any one of them is silently dropped on the next save. Both
+// parties or neither: a single name cannot be charged to anyone. Whether it has
+// been CHARGED is not recorded here but in world.chargedRefusals, because chat
+// writers save from whatever copy they hold and would erase it.
 const refusalFields = (source) => {
     const overlord = asText(source?.refusedOverlord);
     const puppet = asText(source?.refusedPuppet);
-    const round = Number(source?.refusalChargedRound);
-    return {
-        ...(overlord && puppet ? { refusedOverlord: overlord, refusedPuppet: puppet } : {}),
-        ...(Number.isFinite(round) && round > 0 ? { refusalChargedRound: Math.trunc(round) } : {}),
-    };
+    return overlord && puppet ? { refusedOverlord: overlord, refusedPuppet: puppet } : {};
 };
-const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
-const fold = (value) => asText(value).toLowerCase();
 
 let sequence = 0;
 const mintId = (prefix) => {

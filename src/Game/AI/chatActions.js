@@ -56,6 +56,17 @@ const refFromLabel = (label) => fold(label).replace(/[^a-z0-9]+/g, "-").replace(
 // Reading one action
 // ---------------------------------------------------------------------------
 
+// A refusal of an Overlord's demand: the structured twin of the hidden
+// REFUSED_DEMAND line a one-on-one reply carries (diplomaticEnvelope.js), named
+// the same so both paths feed the one deterministic Loyalty rule. BOTH parties
+// or neither — one name cannot be charged to anyone, and guessing the other from
+// who spoke is a mistake already made once.
+const refusalOf = (source) => {
+    const refusedOverlord = asText(source?.refusedOverlord);
+    const refusedPuppet = asText(source?.refusedPuppet);
+    return refusedOverlord && refusedPuppet ? { refusedOverlord, refusedPuppet } : {};
+};
+
 export const normalizeChatAction = (entry) => {
     if (!entry || typeof entry !== "object") return null;
     const type = fold(entry.type ?? entry.action ?? entry.op);
@@ -66,17 +77,7 @@ export const normalizeChatAction = (entry) => {
 
     if (type === "send_message") {
         const content = clip(asText(entry.content ?? entry.text ?? entry.message), MESSAGE_MAX_CHARS);
-        if (!content) return null;
-        // A refusal of an Overlord's demand: the structured twin of the hidden
-        // REFUSED_DEMAND line a one-on-one reply carries (diplomaticEnvelope.js),
-        // named the same so both paths feed the one deterministic Loyalty rule.
-        // BOTH parties or neither — one name cannot be charged to anyone, and
-        // guessing the other from who spoke is a mistake already made once.
-        const refusedOverlord = asText(entry.refusedOverlord);
-        const refusedPuppet = asText(entry.refusedPuppet);
-        return refusedOverlord && refusedPuppet
-            ? { ...base, content, refusedOverlord, refusedPuppet }
-            : { ...base, content };
+        return content ? { ...base, content, ...refusalOf(entry) } : null;
     }
     if (type === "add_reaction") {
         const emoji = clip(asText(entry.emoji), EMOJI_MAX_CHARS);
@@ -173,9 +174,7 @@ export const applyChatActionBatch = (actions, roster = {}, { time = "" } = {}) =
             const id = nextId("msg");
             events.push({
                 id, kind: "message", time, by: actor, role: "leader", code: "", text: action.content,
-                ...(action.refusedOverlord && action.refusedPuppet
-                    ? { refusedOverlord: action.refusedOverlord, refusedPuppet: action.refusedPuppet }
-                    : {}),
+                ...refusalOf(action),
             });
             messageIds.add(id);
             applied.push({ ...action, actorName: actor, id });

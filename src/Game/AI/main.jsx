@@ -25,7 +25,7 @@ import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
-import { describeRole, livePuppetsFor } from "../../runtime/puppets.js";
+import { describePuppetBriefing, describeRole, livePuppetsFor, puppetBriefingFor } from "../../runtime/puppets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import {
   buildDiplomaticTurnInstruction,
@@ -2956,8 +2956,24 @@ export async function buildDiplomaticSystemPrompt(countries, playerCountry, spea
         })
         : "";
 
+    // What this leader's country knows of who directs whom (runtime/puppets.js):
+    // its own arrangements, and for a covert one who in THIS room has not found
+    // out - without that a covert Puppet cannot know to speak as an independent
+    // country, nor recognise that a demand it is refusing came from its own
+    // Overlord (the REFUSED_DEMAND line depends on it). Its country's knowledge,
+    // not the whole ledger: that would hand every leader every secret.
+    //
+    // The PLAYER is added to the room by hand: a chat's countries list only its
+    // non-player members (chatVisibility.js), and playerCountry arrives null on
+    // the panel's path. Without this a covert Puppet talking to the player would
+    // count nobody present as unaware, and speak openly to the one party it most
+    // needs to deceive.
+    const subordinations = speaker
+        ? describePuppetBriefing(puppetBriefingFor(worldData, speaker, { present: [...countries, playerCountry || gameData?.country] }), speaker)
+        : "";
+
     // Leaders negotiate as softly or ruthlessly as the chosen difficulty.
-    return `${rendered}${espionage}${papers ? `\n\n${papers}` : ""}${reminders ? `\n\n${reminders}` : ""}\n\n${difficultyDirective(gameData?.difficulty)}`;
+    return `${rendered}${espionage}${subordinations ? `\n\n${subordinations}` : ""}${papers ? `\n\n${papers}` : ""}${reminders ? `\n\n${reminders}` : ""}\n\n${difficultyDirective(gameData?.difficulty)}`;
 }
 
 let advisorHistory = [];

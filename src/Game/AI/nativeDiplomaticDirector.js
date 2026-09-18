@@ -1678,6 +1678,78 @@ export const applyPuppetUpdates = ({
   return { world: merged, puppets: merged.puppets, appliedIds: applied, refusedDemandCount, storylineSeeds: [...storylineResolutions, ...storylineSeeds] };
 };
 
+// STARTING PUPPETS. The pregame bootstrap answers in one flat canonicalUpdates
+// list (canonicalUpdateSchema), not in per-ledger lines, so its subordinations
+// arrive as entries like any other day-one fact. At the start of a game the only
+// thing to say of one is that it stands, so the operation slot carries its
+// secrecy instead of a verb: puppet:open or puppet:covert. The shared fields do
+// the rest — polities is [overlord, puppet], category the kind, score the
+// loyalty. Lives here rather than beside the other families in gameplay.js
+// because this module is the one that can be tested.
+export const puppetUpdatesFromCanonical = (canonicalUpdates) => array(canonicalUpdates)
+  .filter((raw) => raw && typeof raw === "object" && !Array.isArray(raw))
+  .map((raw) => {
+    const [family = "", secrecy = ""] = lower(raw.kind).split(":").map((part) => part.trim());
+    if (family !== "puppet") return null;
+    const [overlord = "", puppet = ""] = array(raw.polities).map(clean);
+    if (!overlord || !puppet) return null;
+    const loyalty = Number(raw.score);
+    return {
+      op: "install",
+      overlord,
+      puppet,
+      kind: lower(raw.category),
+      loyalty: Number.isFinite(loyalty) && loyalty > 0 ? clamp(Math.round(loyalty), 0, 100) : null,
+      secrecy: secrecy === "covert" ? "covert" : "open",
+      eventIndexes: [],
+      eventIds: [],
+      note: clean(raw.detail),
+    };
+  })
+  .filter(Boolean);
+
+// ESPIONAGE UNCOVERS COVERT ARRANGEMENTS. An agent working inside either party
+// to a covert subordination tells its owner of it; this is the one door by which
+// a third party joins knownTo. Deterministic on presence: the roll that matters
+// already happened in spycraft, when the agent got in and stayed undiscovered.
+//
+// Only an ACTIVE agent. A turned one reports what its captors choose, and they
+// would not hand over their own secret; a discovered one reports nothing.
+//
+// Each knownTo entry records the status its polity LAST SAW (seenStatus). An
+// agent still in place refreshes it, which is how a lapsed arrangement is ever
+// learned to have lapsed; with no agent, the old belief stands. That is the
+// staleness the design wants, now with a way out of it.
+export const revealPuppetsToSpies = (world, date = "") => {
+  const spies = array(world?.spies).filter((spy) => lower(spy?.status) === "active");
+  if (!spies.length || !array(world?.puppets).length) return world;
+  const stamp = clean(date);
+  const puppets = array(world.puppets).map((row) => {
+    if (lower(row?.secrecy) !== "covert") return row;
+    const party = [lower(row.overlord), lower(row.puppet)];
+    const learners = [...new Set(spies
+      .filter((spy) => party.includes(lower(spy?.target)) && !party.includes(lower(spy?.owner)))
+      .map((spy) => clean(spy.owner))
+      .filter(Boolean))];
+    if (!learners.length) return row;
+    const knownTo = array(row.knownTo).map((entry) => (typeof entry === "string" ? { polity: entry, learnedDate: "" } : { ...entry }));
+    const seenStatus = lower(row.status) || "active";
+    for (const learner of learners) {
+      const existing = knownTo.find((entry) => lower(entry?.polity) === lower(learner));
+      if (existing) {
+        existing.learnedDate = stamp || existing.learnedDate;
+        existing.seenStatus = seenStatus;
+      } else if (seenStatus === "active") {
+        // A past arrangement nobody told you of is not news worth an agent's
+        // cable; only a standing one is uncovered for the first time.
+        knownTo.push({ polity: learner, learnedDate: stamp, seenStatus });
+      }
+    }
+    return { ...row, knownTo };
+  });
+  return { ...world, puppets };
+};
+
 export const applyDiplomaticUpdates = ({
   world,
   relationUpdates,
@@ -1834,11 +1906,14 @@ export const buildBoundedDiplomaticContext = (
     })
     .slice(0, MAX_CONTEXT_AGREEMENTS);
 
-  // Subordinations among the attention actors. The simulator and the chat task
-  // see the TRUTH — loyalty, secrecy and who else has found out — because the
-  // chat task in particular has to know which way to lie: a covert Puppet
-  // talking to a third party must speak as an independent country. What a
-  // PLAYER may see is a different question, answered by runtime/puppets.js.
+  // Subordinations among the attention actors, as the TRUTH — loyalty, secrecy
+  // and who else has found out. This context reaches the jump, the idle
+  // diplomacy pass and next-speaker, all of which reason about the whole world.
+  // It does NOT reach a leader or a group turn, and must not: a leader speaks as
+  // one country and is briefed on what that country knows instead
+  // (runtime/puppets.js puppetBriefingFor). An earlier comment here said the chat
+  // task read this block; it never did, and believing so hid that a covert
+  // Puppet in conversation did not know it was one.
   const puppets = array(world.puppets)
     .filter((row) => row.status === "active")
     .filter((row) => actorKeys.has(politySetKey(row.overlord)) || actorKeys.has(politySetKey(row.puppet)))

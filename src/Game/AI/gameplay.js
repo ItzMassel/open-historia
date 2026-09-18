@@ -1,6 +1,7 @@
 /*! Open Historia — portions (briefing dossiers + timeout/fallback hardening) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import { callAI, providerSupportsBatch, retrieveAIBatch, sendDiplomaticMessageOnceOff, submitAIBatch } from "./main.jsx";
 import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
+import { describePuppetBriefing, puppetBriefingFor } from "../../runtime/puppets.js";
 import { NATIVE_GAME_MASTER_PROMPT, normalizePromptPack } from "./gameplayPrompts.js";
 import { collectFoundedPolities, foundingPolityChange } from "../../runtime/polityFounding.js";
 import { TERRITORY_BASIS_DIRECTIVE, describeBasisAction, screenTerritoryBasis } from "../../runtime/territoryBasis.js";
@@ -206,6 +207,8 @@ import {
   DIPLOMATIC_LEDGER_VERSION,
   applyDiplomaticUpdates,
   bindPuppetUpdatesToEvents,
+  revealPuppetsToSpies,
+  puppetUpdatesFromCanonical,
   decodePuppetUpdates,
   bindAgreementUpdatesToEvents,
   bindRelationUpdatesToEvents,
@@ -599,7 +602,7 @@ Relation decision model: a canonical bilateral relation score/status is persiste
   ops: install (create) | reclassify (change kind) | loyalty (move the score) | reveal (covert becomes open, permanently) | release (the overlord lets go) | annex (absorbed) | revolt (thrown off) | suppress (a rising CRUSHED - the overlord holds on, loyalty is forced up at gunpoint, and the overlord's reputation should fall with it). kind is one of protectorate (keeps internal rule, surrenders foreign policy) | satellite (keeps formal sovereignty, loses real independence) | client (bought or installed government); it states WHICH POWERS the overlord holds, not how tightly, so use reclassify rather than treating the three as a scale. loyalty is 0-100, how far the puppet accepts direction - move it when the period earned it, never merely because time passed. secrecy is open (the arrangement is publicly known, as a signed protectorate is) or covert (only the two parties know). Only install needs kind/loyalty/secrecy; the rest may leave them blank.
   A puppet may hold no puppets of its own: installing one over a polity that already has them moves those to the new overlord automatically. A polity has at most one overlord, and reveal cannot be undone.
   Coup model: a puppet whose loyalty has collapsed has a hidden storyline building against it, and YOU decide whether and when that breaks. A rising may succeed (emit revolt) or be put down (emit suppress); either is a real outcome and neither is owed to the player. Before it breaks, unrest should be VISIBLE to an overlord who has the means to see it - if the overlord has an agent inside the puppet or a strong intelligence service, return a timeline event reporting the unrest, so the warning is bought rather than given. A puppet at high loyalty does not revolt.
-  Puppet decision model: a Puppet is a SEPARATE COUNTRY with its own interests, not a possession. It may refuse what its overlord demands, and loyalty is the prior for how likely that is, never a veto. Annexing one's own Puppet meets far less resistance than conquering a foreign power, and a Puppet at high loyalty may accept absorption outright - and the standing it costs the overlord is applied for you - do not emit a polityChanges reputation drop for it as well, or it is paid twice. A covert Puppet must speak and act as a fully independent country toward anyone not party to the arrangement.
+  Puppet decision model: a Puppet is a SEPARATE COUNTRY with its own interests, not a possession. It may refuse what its overlord demands, and loyalty is the prior for how likely that is, never a veto. Annexing one's own Puppet meets far less resistance than conquering a foreign power, and a Puppet at high loyalty may accept absorption outright - and the standing it costs the overlord is applied for you - do not emit a polityChanges reputation drop for it as well, or it is paid twice. Likewise a puppet REFUSING its overlord's demand in conversation is charged its loyalty cost for you, once, by the engine: narrate what follows from the refusal as you see fit, but do not also emit a loyalty line for the refusal itself, or it is paid twice. Move loyalty for everything else the period brought. A covert Puppet must speak and act as a fully independent country toward anyone not party to the arrangement.
 - Return relationUpdates:"", agreementUpdates:"" and puppetUpdates:"" when nothing material changes.`;
 };
 
@@ -623,6 +626,7 @@ Kinds:
 - storyline:active | storyline:dormant: id (stable, e.g. storyline-<slug>), polities (participants), pressure (0-100, unresolved stakes), momentum (0-100, current rate of change), date (when the process began, YYYY-MM-DD), category (process kind: crisis, revolution, diplomacy, politics, economy, insurgency...), title, detail (state: what is true now and why it is unresolved). One per unresolved multi-turn process still alive at Round 1 that is NOT itself a live war; the engine mirrors every live war into a storyline on its own.
 - war:start | war:join-a | war:join-b | war:leave | war:ceasefire | war:resume | war:end: id, polities (actors / side A), opponents (side B), detail (note). Every war still live at Round 1 begins with a war:start, and the pre-game event that started it carries the same event.warId.
 - agreement:start: id, polities (parties), category (agreement type: alliance | mutual_defense | guarantee | non_aggression | friendship_consultation | trade_economic | military_cooperation | military_access | neutrality | peace_settlement | other), title, detail (terms). Only agreements still in force on the start date; instruments that already ended belong in the backstory only.
+- puppet:open | puppet:covert: polities=[overlord, puppet], category (puppet kind: protectorate | satellite | client - which powers the overlord holds, not how tightly), score (the puppet's loyalty to its overlord, 0-100), detail (how it came about). A polity whose will another directs while it remains a separate country, holding its own territory - a Slovakia under Germany, a Manchukuo under Japan. open if the world knows of it; covert only if it is genuinely secret. One overlord per puppet, and a puppet holds no puppets of its own. Only arrangements standing on the start date.
 Never output relation status or event indexes/ids; the engine owns those.
 
 ROUND-ZERO AUDIT
@@ -728,7 +732,10 @@ const expandCanonicalUpdateEnvelope = (candidate) => {
     }
   }
 
-  const expanded = { ...candidate, storylineUpdates, warUpdates, relationUpdates, agreementUpdates };
+  // Subordinations already standing on the start date (puppet:open / puppet:covert).
+  const puppetUpdates = puppetUpdatesFromCanonical(candidate.canonicalUpdates);
+
+  const expanded = { ...candidate, storylineUpdates, warUpdates, relationUpdates, agreementUpdates, puppetUpdates };
   delete expanded.canonicalUpdates;
   return expanded;
 };
@@ -6300,7 +6307,7 @@ export const sendAdvisorDraftedMessage = async ({ countryName, text }) => {
     const priorMessages = withoutUnseenMessages(existing?.messages ?? [], unseenEvents.unseenFor(bundle.world));
 
     const gameDate = normalizeString(bundle.game?.gameDate);
-    const { reply, reaction, memorySummary } = await sendDiplomaticMessageOnceOff({
+    const { reply, reaction, memorySummary, refusedOverlord, refusedPuppet } = await sendDiplomaticMessageOnceOff({
       playerMessage: trimmedText,
       speakingAs: recipient.name,
       participantNames: [playerName, recipient.name],
@@ -6319,6 +6326,10 @@ export const sendAdvisorDraftedMessage = async ({ countryName, text }) => {
     const leaderMessage = {
       role: "leader", speaker: recipient.name, code: recipient.code || "", text: reply, time: gameDate,
       ...(memorySummary ? { memorySummary } : {}),
+      // A refusal of an Overlord's demand, the same as the panel carries: a
+      // player who tells their Overlord no through the advisor's send button
+      // has refused exactly as much as one who typed it in the thread.
+      ...(refusedOverlord && refusedPuppet ? { refusedOverlord, refusedPuppet } : {}),
     };
 
     const built = normalizeChatEntry({
@@ -6792,11 +6803,12 @@ const applySimulationResult = async ({
   // hidden REFUSED_DEMAND line (diplomaticEnvelope.js) and it rides on the saved
   // message. Collected here off the transcript rather than written to the world
   // when it happened, because a world write from the chat panel would race the
-  // turn's. chargeRefusals owns the rest — once per refusal, stamped on the
-  // thread log as well as the message — and is where it can be tested.
-  const refusalCharge = chargeRefusals(nextChats, nextGame.round || 0);
+  // turn's. chargeRefusals owns the rest — once per refusal, recorded in
+  // world.chargedRefusals where no chat writer can erase it — and is where it
+  // can be tested.
+  const refusalCharge = chargeRefusals(nextChats, worldWithImpacts.chargedRefusals);
   const refusedDemands = refusalCharge.refusedDemands;
-  nextChats.splice(0, nextChats.length, ...refusalCharge.chats);
+  worldWithImpacts = { ...worldWithImpacts, chargedRefusals: refusalCharge.charged };
 
   const diplomaticMerge = applyDiplomaticUpdates({
     world: worldWithImpacts,
@@ -6808,7 +6820,10 @@ const applySimulationResult = async ({
     stopDate: nextGame.gameDate,
     round: nextGame.round,
   });
-  worldWithImpacts = diplomaticMerge.world;
+  // Agents report on the ledger as this turn left it: an arrangement installed
+  // or ended this turn is what an agent inside either party now sees. After the
+  // merge, and after espionage has decided which agents are still in place.
+  worldWithImpacts = revealPuppetsToSpies(diplomaticMerge.world, nextGame.gameDate);
   // Storylines last: they read the wars and relations as this turn left them.
   // A Puppet whose Loyalty has collapsed is handed a hidden Storyline by the
   // engine, not the model — a turn that forgot to open one would mean a decade
@@ -11130,6 +11145,23 @@ export const runChatActionBatch = async ({
     ? `${knowledgeBlocks.join("\n\n")}\n\nEach block above belongs to ONE polity. What is in another polity's block is not known to this one: write each leader from its own cables alone.`
     : "";
 
+  // What each AI participant's country knows of who directs whom
+  // (runtime/puppets.js) — the group twin of the one-on-one leader's briefing,
+  // held to the same discipline as the cables above: one block per polity, and a
+  // polity knows only its own. Without it a covert Puppet at the table does not
+  // know to present itself as independent, nor that the demand it is refusing
+  // came from its own Overlord, so it cannot mark the refusal either. The room is
+  // every AI participant and the player, who is exactly who a covert Puppet most
+  // needs to deceive.
+  const briefingWorld = normalizeWorldState(bundle.world);
+  const inTheRoom = [...aiParticipants, player];
+  const subordinationBlocks = aiParticipants
+    .map((speaker) => describePuppetBriefing(puppetBriefingFor(briefingWorld, speaker, { present: inTheRoom }), speaker))
+    .filter(Boolean);
+  const subordinationKnowledge = subordinationBlocks.length
+    ? `${subordinationBlocks.join('\n\n')}\n\nEach subordinations block belongs to ONE polity, like the cables. A polity may not reveal a covert arrangement it is party to to anyone its block lists as not knowing, and never knows another polity's covert arrangements unless its own block says so.`
+    : "";
+
   const openPolls = projected.polls.filter((poll) => poll.options.length);
   const pollText = openPolls.length
     ? `\n[Polls open in this conversation]\n${openPolls.map((poll) => (
@@ -11169,7 +11201,9 @@ export const runChatActionBatch = async ({
     chatParticipants: rosterText,
     chatHistory: transcript || "(nothing said yet)",
     CHAT_OPEN_POLLS: pollText,
-    CROSS_CHAT_KNOWLEDGE: crossChatKnowledge ? `\n${crossChatKnowledge}` : "",
+    CROSS_CHAT_KNOWLEDGE: [crossChatKnowledge, subordinationKnowledge].some(Boolean)
+      ? `\n${[crossChatKnowledge, subordinationKnowledge].filter(Boolean).join('\n\n')}`
+      : "",
     CHAT_ACTION_FEEDBACK: normalizeString(chat?.actionFeedback) ? `\n${chat.actionFeedback}` : "",
   };
 

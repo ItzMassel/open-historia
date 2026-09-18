@@ -30,7 +30,7 @@
 // a turned agent fabricate relationships outright (see the ADR).
 
 export const PUPPET_KINDS = ["protectorate", "satellite", "client"];
-export const PUPPET_SECRECIES = ["open", "covert"];
+export const PUPPET_SECRECY_LEVELS = ["open", "covert"];
 export const PUPPET_STATUSES = ["active", "released", "annexed", "revolted"];
 export const MAX_PUPPETS = 64;
 
@@ -60,7 +60,7 @@ const knownEntry = (row, viewer) => {
       continue;
     }
     if (same(entry?.polity, viewer)) {
-      return { polity: str(entry.polity), learnedDate: str(entry.learnedDate) };
+      return { polity: str(entry.polity), learnedDate: str(entry.learnedDate), seenStatus: norm(entry.seenStatus) };
     }
   }
   return null;
@@ -99,7 +99,11 @@ const viewOf = (row, viewer) => {
   // intelligence goes on standing in the viewer's mind until fresh reporting
   // says otherwise, and nothing here tells them it has not.
   const trueStatus = PUPPET_STATUSES.includes(norm(row?.status)) ? norm(row.status) : "active";
-  const status = learned ? "active" : trueStatus;
+  // What the viewer LAST SAW, not what is so: an agent still in place brings the
+  // entry up to date, and without one the old belief stands.
+  const status = learned
+    ? (PUPPET_STATUSES.includes(learned.seenStatus) ? learned.seenStatus : "active")
+    : trueStatus;
 
   return {
     id: str(row?.id),
@@ -109,7 +113,7 @@ const viewOf = (row, viewer) => {
     secrecy: covert ? "covert" : "open",
     status,
     startedDate: str(row?.startedDate),
-    endedDate: learned ? "" : str(row?.endedDate),
+    endedDate: learned && status === "active" ? "" : str(row?.endedDate),
     role,
     loyalty,
     // Null for everyone but the Overlord — and callers interpolate this straight
@@ -143,4 +147,68 @@ export const describeRole = (row, { overlord, puppet, foreign }) => {
   if (row?.role === "overlord") return overlord?.(row);
   if (row?.role === "puppet") return puppet?.(row);
   return foreign?.(row);
+};
+
+// What a LEADER speaking as `viewer` is told about subordinations — the chat
+// counterpart of the advisor's filtered view, and the same rule
+// chatVisibility.js applies to transcripts: a leader speaks as one polity, so it
+// knows what that polity knows and nothing more. Handing every leader the whole
+// ledger would let France's leader "know" a covert deal France never uncovered.
+//
+//   own     — the viewer's own arrangements, as Overlord or Puppet. A party to a
+//             subordination always knows it. For a COVERT one the briefing also
+//             names who in the room has NOT found out (`present` is everyone in
+//             the room, as names or { name } entries, the player included), because that is what the leader needs to know which way
+//             to lie. An Overlord is told its Puppet's mood; a Puppet is not
+//             told its own.
+//   learned — other polities' arrangements the viewer has uncovered, with when.
+export const puppetBriefingFor = (world, viewer, { present = [] } = {}) => {
+  const rows = Array.isArray(world?.puppets) ? world.puppets : [];
+  const own = [];
+  for (const row of rows) {
+    if (norm(row?.status || "active") !== "active") continue;
+    const role = roleOf(row, viewer);
+    if (role === "foreign") continue;
+    const counterpart = str(role === "overlord" ? row.puppet : row.overlord);
+    const covert = norm(row?.secrecy) === "covert";
+    const unawareHere = covert
+      ? [...new Set(present.map((entry) => str(entry?.name ?? entry)).filter(Boolean))].filter((name) =>
+        !same(name, viewer) && !same(name, counterpart) && !knownEntry(row, name))
+      : [];
+    own.push({
+      role,
+      counterpart,
+      kind: PUPPET_KINDS.includes(norm(row?.kind)) ? norm(row.kind) : "client",
+      secrecy: covert ? "covert" : "open",
+      loyaltyBand: role === "overlord" ? loyaltyBand(row?.loyalty) : null,
+      unawareHere,
+    });
+  }
+  const learned = livePuppetsFor(world, viewer)
+    .filter((row) => row.role === "foreign")
+    .map((row) => ({ overlord: row.overlord, puppet: row.puppet, kind: row.kind, fromIntelligence: row.fromIntelligence, asOf: row.asOf }));
+  return { own, learned };
+};
+
+// The briefing as prompt text, or "" when there is nothing to say. Shared by the
+// one-on-one leader and the group turn so the two cannot describe the same
+// arrangement differently.
+export const describePuppetBriefing = ({ own = [], learned = [] } = {}, viewer = "") => {
+  if (!own.length && !learned.length) return "";
+  const lines = [];
+  for (const row of own) {
+    const head = row.role === "puppet"
+      ? `${viewer} is the ${row.kind} of ${row.counterpart}: its will is directed from there, though it remains a separate country.`
+      : `${viewer} directs ${row.counterpart} as its ${row.kind} (${row.counterpart}'s mood toward ${viewer}: ${String(row.loyaltyBand || "").toLowerCase()}).`;
+    const secret = row.secrecy === "covert"
+      ? (row.unawareHere.length
+        ? ` The arrangement is SECRET, and ${row.unawareHere.join(", ")} ${row.unawareHere.length === 1 ? "does" : "do"} not know: toward ${row.unawareHere.length === 1 ? "them" : "any of them"}, ${row.role === "puppet" ? viewer : row.counterpart} is a fully independent country, and nothing said here may suggest otherwise.`
+        : " The arrangement is secret, but everyone in this conversation already knows of it.")
+      : " The arrangement is openly known.";
+    lines.push(`- ${head}${secret}`);
+  }
+  for (const row of learned) {
+    lines.push(`- ${viewer}'s services know that ${row.overlord} directs ${row.puppet} as its ${row.kind}${row.fromIntelligence ? `${row.asOf ? ` (as of ${row.asOf})` : ""}, though this is not public` : ""}.`);
+  }
+  return `[Subordinations ${viewer} Knows Of]\n${lines.join("\n")}`;
 };

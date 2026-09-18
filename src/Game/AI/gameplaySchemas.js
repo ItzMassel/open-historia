@@ -1241,13 +1241,13 @@ const canonicalUpdateSchema = {
     kind: {
       type: "string",
       description:
-        "Semantic kind code. Use relation; storyline:active; storyline:dormant; war:start; war:join-a; war:join-b; war:leave; war:ceasefire; war:resume; war:end; agreement:start.",
+        "Semantic kind code. Use relation; storyline:active; storyline:dormant; war:start; war:join-a; war:join-b; war:leave; war:ceasefire; war:resume; war:end; agreement:start; puppet:open; puppet:covert.",
     },
     id: { type: "string", description: "Stable storyline/war/agreement id, or empty for a relation." },
     polities: {
       type: "array",
       description:
-        "Primary polities. Relation: exactly [A,B]. Storyline: participants. War: actors / side A. Agreement: parties.",
+        "Primary polities. Relation: exactly [A,B]. Storyline: participants. War: actors / side A. Agreement: parties. Puppet: exactly [overlord, puppet].",
       items: { type: "string" },
     },
     opponents: {
@@ -1257,7 +1257,7 @@ const canonicalUpdateSchema = {
     },
     score: {
       type: "integer",
-      description: "Relation absolute score -100..100; 0 for non-relation items. The engine clamps it and derives the status.",
+      description: "Relation absolute score -100..100. Puppet: its loyalty to its overlord, 0-100. 0 for other items. The engine clamps it and derives the status.",
     },
     pressure: {
       type: "integer",
@@ -1273,7 +1273,7 @@ const canonicalUpdateSchema = {
     },
     category: {
       type: "string",
-      description: "Storyline process kind (war, crisis, revolution, diplomacy, politics, economy) or agreement type (alliance, mutual_defense, guarantee, non_aggression, friendship_consultation, trade_economic, military_cooperation, military_access, neutrality, peace_settlement, other); otherwise empty.",
+      description: "Storyline process kind (war, crisis, revolution, diplomacy, politics, economy) or agreement type (alliance, mutual_defense, guarantee, non_aggression, friendship_consultation, trade_economic, military_cooperation, military_access, neutrality, peace_settlement, other), or puppet kind (protectorate, satellite, client); otherwise empty.",
     },
     title: {
       type: "string",
