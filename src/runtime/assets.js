@@ -71,6 +71,7 @@ export const JSON_URLS = {
   colors: "",
   flags: "",
   tags: "",
+  stats: "",
   events: "",
   game: "",
   prompts: "",
@@ -211,6 +212,7 @@ const isMutableRuntimeJsonUrl = (url) =>
   url === JSON_URLS.colors ||
   url === JSON_URLS.flags ||
   url === JSON_URLS.tags ||
+  url === JSON_URLS.stats ||
   url === JSON_URLS.events ||
   url === JSON_URLS.game ||
   url === JSON_URLS.intercepts ||
@@ -428,6 +430,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
   JSON_URLS.colors = withRuntimeToken("/api/runtime/json/colors");
   JSON_URLS.flags = withRuntimeToken("/api/runtime/json/flags");
   JSON_URLS.tags = withRuntimeToken("/api/runtime/json/tags");
+  JSON_URLS.stats = withRuntimeToken("/api/runtime/json/stats");
   JSON_URLS.events = withRuntimeToken("/api/runtime/json/events");
   JSON_URLS.game = withRuntimeToken("/api/runtime/json/game");
   JSON_URLS.prompts = withRuntimeToken("/api/runtime/json/prompts");
@@ -1426,16 +1429,26 @@ export const loadCountryNames = async ({ force = false } = {}) => {
   countryNamesPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.countries;
-      if (!layer) return [];
+      // The STOCK world's countries, from the tile archive — one of two sources,
+      // and the optional one. This used to return an empty catalog the moment the
+      // archive could not be read, before the world's own polities below had been
+      // looked at: a hand-drawn map, whose every country lives in polityOverrides,
+      // lost all of them to a missing tile file, and with them the country pickers,
+      // the map labels and every name a chat participant or a report holder is
+      // resolved against. (The same gap loadRegionCatalog had.) The archive is
+      // tried; the world's declared polities are always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.countries ?? null;
+      } catch (error) {
+        console.warn("The stock country tiles could not be read; the catalog carries this world's own polities only.", error);
+      }
 
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const code = props?.GID_0 || props?.gid_0 || props?.ISO_A3 || props?.iso_a3 || "";
         const name = resolveCountryDisplayName(
@@ -1497,7 +1510,12 @@ export const primeCustomRegionCatalogEntries = (
     const lng = Number(raw?.lng);
     const lat = Number(raw?.lat);
     entries.push({
-      country: raw?.country ? String(raw.country) : "",
+      // A drawn region's baked owner is its `owner` (see primeCustomRegionCatalog
+      // below, which reads the geojson itself and has always done this). The map
+      // worker's records carry it as `owner` beside an empty `country`, so without
+      // this every drawn region primed by the map lost its base owner — and with it
+      // who holds what, wherever this catalog is read.
+      country: raw?.country ? String(raw.country) : raw?.owner ? String(raw.owner) : "",
       countryCode: raw?.countryCode ? String(raw.countryCode) : "",
       id,
       name: name || id,
@@ -1508,6 +1526,7 @@ export const primeCustomRegionCatalogEntries = (
       adjacencies: Array.isArray(raw?.adjacencies)
         ? raw.adjacencies.map((value) => String(value)).filter(Boolean)
         : [],
+      ...(isBox(raw?.bounds) ? { bounds: raw.bounds } : {}),
     });
   }
   primedCustomRegionCatalog = entries;
@@ -1516,6 +1535,14 @@ export const primeCustomRegionCatalogEntries = (
     regionCatalogPromise = null;
     regionCatalogPromiseKey = "";
   }
+  // The map's worker primes this well after the panels have mounted. A panel
+  // that frames things with it (the event cards' links, time.jsx) listens for
+  // this and derives again, instead of keeping what it made without it.
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    try {
+      window.dispatchEvent(new CustomEvent("oh:region-catalog-primed"));
+    } catch { /* a listener's failure is not the catalog's */ }
+  }
   reportPerfOperation(
     "prime compact custom region catalog",
     perfNow() - startedAt,
@@ -1523,6 +1550,50 @@ export const primeCustomRegionCatalogEntries = (
   );
   return entries;
 };
+
+// A drawn region's bounding box, taken while its geometry is in memory anyway.
+// The stock outline tables are keyed by GADM id and know nothing of a drawn
+// map, so this is the only frame the event camera and an event card's links can
+// fly to there. A box wider than half the world has crossed the antimeridian
+// (Chukotka): it is measured again with the western longitudes wrapped east, so
+// `east` may exceed 180, which is what MapLibre's fitBounds expects.
+const geometryBounds = (geometry) => {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  const longitudes = [];
+  const visit = (coordinates) => {
+    if (!Array.isArray(coordinates)) return;
+    if (typeof coordinates[0] === "number") {
+      const [lng, lat] = coordinates;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      longitudes.push(lng);
+      if (lng < west) west = lng;
+      if (lng > east) east = lng;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+      return;
+    }
+    for (const part of coordinates) visit(part);
+  };
+  visit(geometry?.coordinates);
+  if (!longitudes.length) return null;
+  if (east - west > 180) {
+    let wrappedWest = Infinity;
+    let wrappedEast = -Infinity;
+    for (const lng of longitudes) {
+      const wrapped = lng < 0 ? lng + 360 : lng;
+      if (wrapped < wrappedWest) wrappedWest = wrapped;
+      if (wrapped > wrappedEast) wrappedEast = wrapped;
+    }
+    return [[wrappedWest, south], [wrappedEast, north]];
+  }
+  return [[west, south], [east, north]];
+};
+
+const isBox = (value) => Array.isArray(value) && value.length === 2
+  && [value[0]?.[0], value[0]?.[1], value[1]?.[0], value[1]?.[1]].every(Number.isFinite);
 
 export const primeCustomRegionCatalog = (
   geojson,
@@ -1550,6 +1621,7 @@ export const primeCustomRegionCatalog = (
       tags: Array.isArray(props?.tags) ? props.tags : [],
       type: props?.type ?? "",
       adjacencies: Array.isArray(props?.adjacencies) ? props.adjacencies : [],
+      bounds: geometryBounds(feature?.geometry),
     });
   }
   return primeCustomRegionCatalogEntries(rawEntries, options);
@@ -1617,16 +1689,26 @@ export const loadRegionCatalog = async ({ force = false } = {}) => {
   regionCatalogPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.regions;
-      if (!layer) return [];
-
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+
+      // The stock world's regions, from the tile archive — ONE of two sources,
+      // and the optional one. This used to return an empty catalog the moment
+      // the archive could not be read, before the scenario's own regions below
+      // had been looked at: a hand-drawn map with every region named in its
+      // geojson lost all of them to a missing tile file, and with them every
+      // lookup, every place name the engine reads, and every prompt's region
+      // list. The archive is tried; the scenario's geometry is always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.regions ?? null;
+      } catch (error) {
+        console.warn("The stock region tiles could not be read; the catalog carries the scenario's own regions only.", error);
+      }
+
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
         // A few GADM regions carry the literal placeholder "NA" as their name (England

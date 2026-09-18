@@ -27,7 +27,7 @@ export const COVER_IMAGE_ASSET_KEY = "cover";
 export const STORAGE_JSON_ASSET_KEYS = ["actions", "advisor", "chat", "events"];
 export const CORE_JSON_ASSET_KEYS = ["game", "prompts", "world"];
 export const JSON_ASSET_KEYS = [...STORAGE_JSON_ASSET_KEYS, ...CORE_JSON_ASSET_KEYS];
-export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags"];
+export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags", "stats"];
 export const RUNTIME_ONLY_JSON_ASSET_KEYS = ["snapshots", "intercepts"];
 export const PMTILES_ASSET_KEYS = ["cities", "countries", "regions"];
 export const SCENARIO_GEOJSON_ASSET_KEYS = ["regionsGeojson", "citiesGeojson", "backgroundData"];
@@ -42,7 +42,7 @@ export const UPLOADABLE_GAME_ASSET_KEYS = [COVER_IMAGE_ASSET_KEY];
 
 export const JSON_ASSET_DEFAULTS = {
   actions: [], advisor: [], chat: [], colors: {}, events: [],
-  game: {}, prompts: {}, world: {}, snapshots: [], intercepts: {},
+  game: {}, prompts: {}, stats: {}, world: {}, snapshots: [], intercepts: {},
 };
 
 // This project's name, deliberately. The scenario schema below is a frozen wire
@@ -58,12 +58,29 @@ export const CLASSIC_SCENARIO_ID = "modern-day-classic";
 export const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENARIO_ID]);
 
 
+// Mirrors TEMPLATE_WORLD_OVERRIDE_KEYS in server/libraryStore.js; held to it by
+// src/runtime/gameBundleParity.test.js. (It had drifted: a duplicated five-key run,
+// and customGeometry on this side only.)
 export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
-  "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "units",
-  "regionClaimants", "regionOwnershipOverrides", "regionSovereigntyOverrides",
-  "simulationRules", "startingTimelineText",
+  "allowedUnitTypes",
+  "author",
+  "background",
+  "basemap",
+  "customCities",
+  "customGeometry",
+  "customRegions",
+  "difficulty",
+  "language",
+  "mapCredit",
+  "notes",
+  "ownerCodes",
+  "polityOverrides",
+  "units",
+  "regionClaimants",
+  "regionOwnershipOverrides",
+  "regionSovereigntyOverrides",
+  "simulationRules",
+  "startingTimelineText",
 ];
 
 export const SUPPORTED_IMAGE_CONTENT_TYPES = new Set([

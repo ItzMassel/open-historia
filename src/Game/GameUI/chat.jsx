@@ -3,7 +3,8 @@ import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { dedupeByName } from "../../runtime/countryList.js";
 import ReactDOM from "react-dom";
 import { sendDiplomaticMessage, startDiplomaticChat, loadDiplomaticHistory } from "../AI/main.jsx";
-import { chooseNextDiplomaticSpeaker, ensureCountryAssessed, processPendingEventOutreach } from "../AI/gameplayLazy.js";
+import { chooseNextDiplomaticSpeaker, ensureCountryAssessed, processPendingEventOutreach, runChatActionBatch } from "../AI/gameplayLazy.js";
+import { eventsFromLegacyChat, projectChatThread } from "../../runtime/chatThreads.js";
 import { isChatGenerationLikely } from "../AI/simulationStatus.js";
 import {
     MAX_ACTIVE_SPIES, activeSpies, deploySpy, expelSpy, foreignSpies, intelligenceOf, normalizeIntercepts, normalizeSpies,
@@ -13,6 +14,8 @@ import { isSeal, newSeal, openExchange } from "../../runtime/spySeal.js";
 import { useActiveFeatures } from "../../runtime/gameFeatures.js";
 import { Actions } from "./actions";
 import { Projects } from "./projects";
+import { DOCK_BOTTOM_REM, DOCK_GAP_REM, DOCK_HEIGHT_REM, DOCK_LEFT_REM, DOCK_WIDTH } from "./hudDock.js";
+import { isDocumentExchange } from "../../runtime/reportDelivery.js";
 import { Presence } from "./presence.jsx";
 import { useMainMenuOpen } from "./libraryBar";
 import {
@@ -20,19 +23,23 @@ import {
     getNationColors,
     getNationFlags,
     loadCountryNames as loadCachedCountryNames,
+    readJson,
 } from "../../runtime/assets.js";
 import { flagEmojiFromGid, flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
 import { fetchCommunityFlags, loadCommunityFlagDataUrl } from "../../runtime/communityFlags.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { readChatsState, writeChatsState, readGameData, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
+import { readChatsState, writeChatsState, readGameData, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld, viewAsSeen } from "../../runtime/gameState.js";
 import { describeRole, visiblePuppetsFor } from "../../runtime/puppets.js";
+import { buildThreadCatchUp } from "../AI/conversationCatchUp.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
-import { formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
+import { compareGameDates, formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 import { refreshRuntimeState, subscribeRuntime } from "../../runtime/runtimeStore.js";
 import { useRuntimeState } from "../../runtime/useRuntimeState.js";
+import { UNSEEN_EVENTS_CHANGED, withoutUnseenChats, withoutUnseenIntercepts, withoutUnseenMessages } from "../../runtime/unseenEvents.js";
+import { unseenEventIdsFor, useUnseenEventIds } from "./useUnseenEvents.js";
 
 // Who the player is and when it is: all this panel reads of game.json.
 const selectGameIdentity = (game) => ({
@@ -48,10 +55,75 @@ const saveAllChats = async (chats) => {
     } catch (err) { console.error("Failed to save chats:", err); }
 };
 
+// How far each leader has been shown of its other threads
+// (AI/crossChatKnowledge.js). Written straight to world state, merged rather
+// than replaced: a turn in one chat must not forget what another chat showed.
+const saveChatKnowledgeCursors = async (cursors) => {
+    try {
+        const world = await readWorldState({ force: true });
+        await writeWorldState({ ...world, chatKnowledgeCursors: { ...(world?.chatKnowledgeCursors ?? {}), ...cursors } });
+    } catch (err) { console.error("Failed to save what each leader has been shown:", err); }
+};
+
 const loadAllChats = async ({ force = false } = {}) => {
     try {
         return await readChatsState({ force });
     } catch { return []; }
+};
+
+// ── What a thread missed ──────────────────────────────────────────────────────
+
+// The moment the player is writing from: the events they have been shown and the
+// date of the last of them — while a skip is being revealed, the reveal's front
+// (gameState.js viewAsSeen). The player's line is dated there, so the thread's
+// next catch-up picks up what the rest of the reveal showed.
+const readSeenChatMoment = async (gameDate) => {
+    try {
+        const [events, world] = await Promise.all([
+            readJson(JSON_URLS.events, { defaultValue: [] }),
+            readJson(JSON_URLS.world, { defaultValue: {}, clone: false }),
+        ]);
+        const seen = await viewAsSeen({ world, events, game: { gameDate } });
+        return { events: seen.events, date: seen.game?.gameDate || gameDate || "" };
+    } catch {
+        return { events: [], date: gameDate || "" };
+    }
+};
+
+// The votes cast in this thread since an AI participant last spoke — the one
+// thing the thread's own log knows that the leaders were not there to see.
+const votesSinceLastTurn = (chat, player) => {
+    const log = Array.isArray(chat?.events) ? chat.events : [];
+    if (!log.length) return [];
+    const me = String(player ?? "").trim().toLowerCase();
+    const lastLeaderLine = log.reduce((at, entry, index) => (
+        entry?.kind === "message" && entry.by && entry.by.trim().toLowerCase() !== me ? index : at
+    ), -1);
+    const { polls } = projectChatThread(log);
+    return log.slice(lastLeaderLine + 1)
+        .filter((entry) => entry?.kind === "poll_vote_cast")
+        .map((entry) => {
+            const poll = polls.find((candidate) => candidate.id === entry.pollId);
+            const option = poll?.options.find((candidate) => candidate.id === entry.optionId);
+            return poll && option ? `${entry.by} voted "${option.label}" on "${poll.question}"` : "";
+        })
+        .filter(Boolean);
+};
+
+// What the world did since this thread last spoke (AI/conversationCatchUp.js):
+// nothing for a thread's first line, or when nothing moved and nobody voted.
+const buildLeaderCatchUp = (messages, chat, player, moment) => {
+    const previous = [...(Array.isArray(messages) ? messages : [])].reverse()
+        .find((msg) => (msg.role === "user" || msg.role === "leader") && msg.time);
+    if (!previous) return { text: "", label: "" };
+    return buildThreadCatchUp({
+        previousDate: previous.time,
+        currentDate: moment?.date || "",
+        events: moment?.events ?? [],
+        votesSince: votesSinceLastTurn(chat, player),
+        compareDates: compareGameDates,
+        formatDate: (value) => formatGameDateReadable(value) || value,
+    });
 };
 
 // ── PMTiles country loader ────────────────────────────────────────────────────
@@ -324,6 +396,67 @@ const EnvelopeIcon = ({ filled }) => (
 
 // ── Message bubble ────────────────────────────────────────────────────────────
 
+// A binding vote in a conversation (AI/chatActions.js). The AI participants
+// vote in the same answer that opens one; the player casts their own, once.
+// A poll is a record, not a control panel: there is no closing it and no
+// changing a vote, because neither is a thing a government gets to do.
+const PollCard = ({ poll, playerCountry, onVote }) => {
+    const votes = poll?.votes ?? {};
+    const mine = Object.entries(votes).find(([voter]) => voter.toLowerCase() === String(playerCountry ?? "").toLowerCase())?.[1] ?? "";
+    const total = Object.keys(votes).length;
+    return (
+        <div style={{
+            background: "rgba(59,130,246,0.08)",
+            border: "1px solid rgba(96,165,250,0.30)",
+            borderRadius: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.45rem",
+            margin: "0.35rem 0",
+            padding: "0.7rem 0.85rem",
+        }}>
+            <span style={{ fontSize: "0.68rem", letterSpacing: "0.04em", color: "rgba(147,197,253,0.9)", textTransform: "uppercase" }}>
+                Vote{poll?.openedBy ? ` · called by ${poll.openedBy}` : ""}
+            </span>
+            <span style={{ fontSize: "0.85rem", fontWeight: 700, lineHeight: 1.35 }}>{poll?.question}</span>
+            {(poll?.tally ?? []).map((option) => {
+                const chosen = mine === option.id;
+                const share = total ? Math.round((option.votes / total) * 100) : 0;
+                const voters = Object.entries(votes).filter(([, id]) => id === option.id).map(([voter]) => voter);
+                return (
+                    <button
+                        key={option.id}
+                        type="button"
+                        disabled={Boolean(mine)}
+                        onClick={() => onVote?.(option.id)}
+                        title={voters.length ? voters.join(", ") : "No vote yet"}
+                        style={{
+                            background: `linear-gradient(to right, rgba(96,165,250,0.28) ${share}%, rgba(255,255,255,0.05) ${share}%)`,
+                            border: chosen ? "1px solid rgba(96,165,250,0.85)" : "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: "8px",
+                            color: "white",
+                            cursor: mine ? "default" : "pointer",
+                            display: "flex",
+                            fontFamily: "inherit",
+                            fontSize: "0.78rem",
+                            justifyContent: "space-between",
+                            padding: "0.4rem 0.6rem",
+                            textAlign: "left",
+                        }}
+                    >
+                        <span>{option.label}{chosen ? " ✓" : ""}</span>
+                        <span data-no-translate style={{ color: "rgba(255,255,255,0.55)" }}>{option.votes}</span>
+                    </button>
+                );
+            })}
+            <span data-no-translate style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem" }}>
+                {total === 0 ? "Nobody has voted yet" : `${total} vote${total === 1 ? "" : "s"} cast`}
+                {mine ? "" : " · your vote is yours to cast"}
+            </span>
+        </div>
+    );
+};
+
 const MessageBubble = ({ msg, onRetry }) => {
     const isPlayer = msg.role === "user";
     const isError  = msg.role === "error";
@@ -349,6 +482,14 @@ const MessageBubble = ({ msg, onRetry }) => {
             }}>
             {isError ? "⚠️ Error" : <><FlagImg url={flagUrl} alt={msg.speaker} size="0.95em" />{msg.speaker}</>}
             </span>
+        )}
+
+        {/* What the leaders were told the world did since this thread last
+            spoke, sent with this line (AI/conversationCatchUp.js); hover for it. */}
+        {isPlayer && msg.catchUpLabel && (
+            <div title={msg.catchUp || ""} style={{ color: "rgba(255,255,255,0.42)", fontSize: "0.66rem", marginBottom: "0.25rem", textAlign: "right" }}>
+                ⏳ {msg.catchUpLabel}
+            </div>
         )}
 
         {isPlayer && reactions.length > 0 && (
@@ -396,7 +537,9 @@ const MessageBubble = ({ msg, onRetry }) => {
 
         {!isPlayer && msg.time && (
             <span style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.3)", marginTop: "0.25rem", display: "block" }}>
-            {new Date(msg.time).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" })}
+            {/* Through gameDates.js: new Date("2016-01-01") is UTC midnight, shown a
+                day early west of Greenwich (the separator above always did this). */}
+            {formatGameDateReadable(msg.time, "MMM D, YYYY") || msg.time}
             </span>
         )}
         </div>
@@ -612,7 +755,7 @@ const CountrySelectorModal = ({
 // 12rem at the default 16px root, matching the composer's max-height below.
 const COMPOSER_MAX_HEIGHT = 192;
 
-const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onMessagesUpdate, unread = false, onToggleRead, draft = "", onDraftApplied }) => {
+const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onMessagesUpdate, onThreadUpdate, unread = false, onToggleRead, draft = "", onDraftApplied }) => {
     // Two-step delete, matching the list row. Disarms on blur so a half-pressed
     // delete never sits waiting to catch a later click.
     const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -625,6 +768,10 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
     const isGroup = countries.length > 1;
 
     const [messages, setMessages]               = useState(chat.messages ?? []);
+    // A letter an event of the skip being revealed delivered waits for the
+    // reveal to reach that event (runtime/unseenEvents.js) — on screen and in
+    // what the leader is sent. The stored thread keeps it all along.
+    const unseen = useUnseenEventIds();
     const [visibleMessageLimit, setVisibleMessageLimit] = useState(CHAT_INITIAL_RENDER_WINDOW);
     const [phase, setPhase]                     = useState("player");
     const [isLoading, setIsLoading]             = useState(false);
@@ -635,6 +782,10 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
 
     const nextSpeakerIdx    = useRef(0);
     const lastPlayerMessage = useRef("");
+    // What the last batch got wrong, told to the next one (AI/chatActions.js
+    // describeChatActionFeedback). Kept on the view: it is about the exchange,
+    // not the saved thread.
+    const actionFeedbackRef = useRef("");
     const messagesEndRef    = useRef(null);
     const messagesRef       = useRef(chat.messages ?? []);
     const composerRef       = useRef(null);
@@ -694,11 +845,25 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
         logDebugEvent("diplomacy",
             `Opened chat #${chat.id} with ${countries.map((country) => country.name).join(", ") || "(nobody)"} — ${saved.length} saved message(s).`,
             undefined, { verbose: true });
-        if (saved.length > 0) loadDiplomaticHistory(saved);
+        const shown = withoutUnseenMessages(saved, unseen);
+        if (shown.length > 0) loadDiplomaticHistory(shown);
         else startDiplomaticChat();
         setVisibleMessageLimit(CHAT_INITIAL_RENDER_WINDOW);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [chat.id]);
+
+    // The reveal moved on while this thread was open: the leader is sent what
+    // the player can now see. Not mid-reply — that exchange is already under way.
+    const unseenKey = [...unseen].join("|");
+    const unseenKeyAtOpen = useRef(unseenKey);
+    useEffect(() => {
+        if (unseenKeyAtOpen.current === unseenKey || isLoading) return;
+        unseenKeyAtOpen.current = unseenKey;
+        const shown = withoutUnseenMessages(messagesRef.current, unseen);
+        if (shown.length > 0) loadDiplomaticHistory(shown);
+        else startDiplomaticChat();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [unseenKey]);
 
         useEffect(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -725,13 +890,18 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             }
             setIsLoading(true);
             setSpeakingCountry(country);
+            // The player's message as stored: the catch-up it was sent with
+            // (AI/conversationCatchUp.js), and the moment it was asked from — a
+            // reply is dated with its question. A retry finds the same one.
+            const asked = [...messagesRef.current].reverse().find((msg) => msg.role === "user" && msg.text === playerMessage);
+            const repliedOn = asked?.time || gameDate;
             try {
-                const { reply, reaction, memorySummary, refusedOverlord, refusedPuppet } = await sendDiplomaticMessage(playerMessage, country.name, countries);
+                const { reply, reaction, memorySummary, refusedOverlord, refusedPuppet } = await sendDiplomaticMessage(playerMessage, country.name, countries, { chatId: chat.id, catchUp: asked?.catchUp || "" });
                 // The thread's rolling durable memory rides on the reply that
                 // produced it, so a reopened thread, the advisor's one-off sends
                 // and the world director read the same continuity.
                 const leaderMessage = {
-                    role: "leader", speaker: country.name, code: country.code, text: reply, time: gameDate,
+                    role: "leader", speaker: country.name, code: country.code, text: reply, time: repliedOn,
                     ...(memorySummary ? { memorySummary } : {}),
                     // A refusal of an Overlord's demand, naming BOTH parties so
                     // it works whichever of them is speaking — an AI Puppet marks
@@ -758,7 +928,7 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                 }
             } catch (err) {
                 pushMessages([...messagesRef.current, {
-                    role: "error", speaker: country.name, code: country.code, text: err.message, time: gameDate,
+                    role: "error", speaker: country.name, code: country.code, text: err.message, time: repliedOn,
                     // Everything handleRetry needs to re-issue this exact turn.
                     // Plain data so it survives a save/reload of the chat.
                     retry: {
@@ -829,13 +999,89 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             setPhase("pending");
         };
 
+        // A GROUP turn in one request (AI/chatActions.js): every AI participant
+        // acts in a single answer — who speaks, who only reacts, who brings
+        // someone in, who calls a vote — instead of one request to pick the
+        // speaker and one per leader after it. A failure falls back to the
+        // rotation below, which is the behaviour this replaces.
+        const runGroupTurn = async (text, nextMessages) => {
+            setIsLoading(true);
+            // The player's line, with the catch-up it carries and its moment.
+            const asked = nextMessages.at(-1);
+            try {
+                const outcome = await runChatActionBatch({
+                    chat: { ...chat, messages: nextMessages, actionFeedback: actionFeedbackRef.current },
+                    playerMessage: text,
+                    playerCountry,
+                    catchUp: asked?.catchUp || "",
+                    time: asked?.time || "",
+                });
+                const spoken = (outcome?.newEvents ?? []).filter((event) => event.kind === "message");
+                if (!spoken.length && !(outcome?.newEvents ?? []).length) return false;
+                actionFeedbackRef.current = outcome?.feedback ?? "";
+                const projected = projectChatThread(outcome.events);
+                // The projection carries the reactions, the roster and the polls
+                // this turn changed; the panel renders messages, so hand it those
+                // and let the stored thread keep the rest.
+                pushMessages(projected.messages.map((message) => ({
+                    id: message.id,
+                    role: message.role,
+                    speaker: message.speaker,
+                    code: message.code,
+                    text: message.text,
+                    time: message.time,
+                    reactions: message.reactions,
+                    ...(message.memorySummary ? { memorySummary: message.memorySummary } : {}),
+                    ...(message.eventId ? { eventId: message.eventId } : {}),
+                    ...(message.catchUp ? { catchUp: message.catchUp, catchUpLabel: message.catchUpLabel } : {}),
+                })));
+                onThreadUpdate?.(chat.id, { events: outcome.events, countries: projected.countries, title: projected.title, polls: projected.polls, cursors: outcome.cursors });
+                setPhase("player");
+                return true;
+            } catch (error) {
+                logDebugEvent("diplomacy", `The one-request chat turn failed in chat #${chat.id}; falling back to the rotation.`, error, { problem: true });
+                return false;
+            } finally {
+                setIsLoading(false);
+                setSpeakingCountry(null);
+            }
+        };
+
+        // The player's own vote. Appended to the thread's log like any other
+        // event, and never cast for them by a model (chatActions.js refuses an
+        // action whose actor is human-controlled).
+        const handlePlayerVote = (poll, optionId) => {
+            if (!poll?.id || !optionId) return;
+            const already = Object.keys(poll.votes ?? {}).some((voter) => voter.toLowerCase() === String(playerCountry ?? "").toLowerCase());
+            if (already) return;
+            const events = [
+                ...(chat.events?.length ? chat.events : eventsFromLegacyChat({ ...chat, messages: messagesRef.current })),
+                { id: `vote-${poll.id}-${playerCountry}`, kind: "poll_vote_cast", time: gameDate, by: playerCountry, pollId: poll.id, optionId },
+            ];
+            const projected = projectChatThread(events);
+            onThreadUpdate?.(chat.id, { events, countries: projected.countries, title: projected.title, polls: projected.polls });
+            logDebugEvent("diplomacy", `${playerCountry} voted in chat #${chat.id}.`, { poll: poll.question, optionId }, { verbose: true });
+        };
+
         const handlePlayerSubmit = async () => {
             const text = playerInput.trim();
             if (!text || isLoading) return;
             lastPlayerMessage.current = text;
-            const nextMessages = [...messagesRef.current, { role: "user", speaker: playerCountry, text, time: gameDate }];
-            pushMessages(nextMessages);
             setPlayerInput("");
+            // What the world did since this thread last spoke, told to the
+            // leaders with the player's line and kept on it (AI/conversationCatchUp.js
+            // buildThreadCatchUp), dated from the moment the player is looking at.
+            const moment = await readSeenChatMoment(gameDate);
+            const catchUp = buildLeaderCatchUp(messagesRef.current, chat, playerCountry, moment);
+            const nextMessages = [...messagesRef.current, {
+                role: "user", speaker: playerCountry, text, time: moment.date || gameDate,
+                ...(catchUp.text ? { catchUp: catchUp.text, catchUpLabel: catchUp.label } : {}),
+            }];
+            pushMessages(nextMessages);
+            // One request for the whole table. Only for a group: a one-on-one
+            // chat is already a single request, and its streaming reply is what
+            // the player watches arrive.
+            if (isGroup && await runGroupTurn(text, nextMessages)) return;
             const queue = await buildResponsiveQueue(nextMessages);
             // Who was asked, and in what order. A group chat sends the same
             // message to each leader in turn, so "France answered as if it had
@@ -891,10 +1137,15 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
         };
 
         const typingSpeaker = speakingCountry ?? countries[0];
-        const visibleMessages = messages.length > visibleMessageLimit
-            ? messages.slice(messages.length - visibleMessageLimit)
-            : messages;
-        const hiddenMessageCount = messages.length - visibleMessages.length;
+        // What the reveal has reached, each with its place in the stored thread
+        // (a retry replays the stored message at that index).
+        const shownEntries = messages
+            .map((msg, index) => ({ msg, index }))
+            .filter(({ msg }) => !unseen.has(String(msg?.eventId ?? "")));
+        const visibleEntries = shownEntries.length > visibleMessageLimit
+            ? shownEntries.slice(shownEntries.length - visibleMessageLimit)
+            : shownEntries;
+        const hiddenMessageCount = shownEntries.length - visibleEntries.length;
 
         return (
             <>
@@ -958,10 +1209,9 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                 already been answered past, and re-running it would splice a
                 reply into the middle of the thread. A date separator opens
                 every new game day. */}
-            {visibleMessages.map((msg, i) => {
-                const index = hiddenMessageCount + i;
+            {visibleEntries.map(({ msg, index }, i) => {
                 const dateKey = chatDateKey(msg?.time);
-                const showDateSeparator = Boolean(dateKey) && (i === 0 || dateKey !== chatDateKey(visibleMessages[i - 1]?.time));
+                const showDateSeparator = Boolean(dateKey) && (i === 0 || dateKey !== chatDateKey(visibleEntries[i - 1]?.msg?.time));
                 return (
                     <React.Fragment key={index}>
                     {showDateSeparator && <ChatDateSeparator value={msg.time} />}
@@ -970,6 +1220,17 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                     </React.Fragment>
                 );
             })}
+            {/* Binding votes opened in this conversation (AI/chatActions.js).
+                The AI participants vote in the same answer that opens one; the
+                player votes here, and their vote is theirs alone to cast. */}
+            {(chat.polls ?? []).map((poll) => (
+                <PollCard
+                    key={poll.id}
+                    poll={poll}
+                    playerCountry={playerCountry}
+                    onVote={(optionId) => handlePlayerVote(poll, optionId)}
+                />
+            ))}
             {isLoading && typingSpeaker && <TypingBubble speaker={typingSpeaker.name} code={typingSpeaker.code} />}
             <div ref={messagesEndRef} />
             </div>
@@ -1561,7 +1822,11 @@ const InterceptView = ({ target, exchange, clarity, seal, onBack }) => {
 
 const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
     const world                       = useRuntimeState("world");
-    const intercepts                  = useRuntimeState("intercepts", normalizeIntercepts);
+    const filedIntercepts             = useRuntimeState("intercepts", normalizeIntercepts);
+    // A copy an agent stole in an event the reveal has not reached yet is not in
+    // the file the player is shown (runtime/unseenEvents.js).
+    const unseen                      = useUnseenEventIds();
+    const intercepts                  = useMemo(() => withoutUnseenIntercepts(filedIntercepts, unseen), [filedIntercepts, unseen]);
     const [open, setOpen]             = useState(null); // { target, exchange }
     const [choosing, setChoosing]     = useState(false);
     const [error, setError]           = useState("");
@@ -1752,7 +2017,8 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
         {targets.map((target) => intercepts[target].exchanges.map((exchange) => (
             <button key={exchange.id} onClick={() => { setOpen({ target, exchange }); void ensureCountryAssessed(target, { reason: "intercept read" }); }}
                 style={{ width: "100%", padding: "0.6rem 0.8rem", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer", fontFamily: "sans-serif", textAlign: "left", color: "white" }}>
-            <span aria-hidden="true" style={{ fontSize: "1rem" }}>📡</span>
+            {/* A stolen document (runtime/reportDelivery.js) beside the agent's traffic. */}
+            <span aria-hidden="true" style={{ fontSize: "1rem" }}>{isDocumentExchange(exchange) ? "📄" : "📡"}</span>
             <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{target} ↔ {exchange.counterpart}</span>
             <span style={{ display: "block", fontSize: "0.68rem", color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{exchange.subject}{exchange.date ? " · " + exchange.date : ""}</span>
@@ -1789,7 +2055,14 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     // mount. Tied to a chat id so navigating to a DIFFERENT chat never inherits it.
     const [composerDraft, setComposerDraft]       = useState(null);
     const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
-    const openChats = chats.filter((chat) => chat.status !== "closed" && Array.isArray(chat.countries) && chat.countries.length > 0);
+    // The threads as the player has been shown them (runtime/unseenEvents.js): a
+    // thread an unseen event opened, or a letter one delivered, arrives when the
+    // reveal reaches that event — and only then counts as unread. Only for
+    // showing: every write below writes `chats`, the stored threads.
+    const unseen = useUnseenEventIds();
+    const shownChats = useMemo(() => withoutUnseenChats(chats, unseen), [chats, unseen]);
+    const shownVersion = (chat) => (chat ? withoutUnseenChats([chat], unseen)[0] ?? chat : chat);
+    const openChats = shownChats.filter((chat) => chat.status !== "closed" && Array.isArray(chat.countries) && chat.countries.length > 0);
 
     // Which chats to flag as unread: seeded from the persisted baseline when the
     // panel OPENS, then only ever added to (arrivals) or cleared per-chat (an
@@ -1915,8 +2188,10 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     // stays the active chat, so messages that arrive WHILE the player is looking
     // at it (an incoming reply, a background poll merge) don't get left stranded
     // above the last-seen baseline and resurface as unread on the next visit.
+    // The list row is the thread as shown; the conversation gets the stored one,
+    // which is what it writes back.
     const openChatFromList = (chat) => {
-        setActiveChat(chat);
+        setActiveChat(chats.find((entry) => entry.id === chat.id) ?? chat);
         setHeldUnreadId(null);
         setChatReadState(chat, true);
     };
@@ -1926,15 +2201,18 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     const toggleActiveChatRead = (chat) => {
         const wasUnread = unreadIds.has(String(chat.id));
         setHeldUnreadId(wasUnread ? null : String(chat.id));
-        setChatReadState(chat, wasUnread);
+        setChatReadState(shownVersion(chat), wasUnread);
     };
 
+    // Read as far as it is shown: a letter still waiting on the reveal is not
+    // read yet, and marks the thread new when it arrives.
+    const shownActiveCount = shownVersion(activeChat)?.messages?.length ?? 0;
     useEffect(() => {
         if (!activeChat) return;
         if (heldUnreadId === String(activeChat.id)) return;
-        setChatReadState(activeChat, true);
+        setChatReadState(shownVersion(activeChat), true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeChat?.id, activeChat?.messages?.length, heldUnreadId]);
+    }, [activeChat?.id, shownActiveCount, heldUnreadId]);
 
     // Leaving a chat ends the hold — the next visit is an ordinary read.
     useEffect(() => {
@@ -2022,6 +2300,22 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
             setActiveChat(ac => ac?.id === chatId ? { ...ac, messages: newMessages } : ac);
             return updated;
         });
+    };
+
+    // What the one-request turn changed beyond the messages: the event log
+    // itself (the truth of the thread), the roster after a join or a departure,
+    // the title, the polls, and each speaker's cross-chat cursors. The cursors
+    // live in world state, so they are written there rather than on the chat.
+    const handleThreadUpdate = (chatId, { events, countries, title, polls, cursors }) => {
+        setChats((prev) => {
+            const updated = prev.map((c) => (c.id === chatId
+                ? { ...c, events, countries: countries ?? c.countries, title: title || c.title, polls: polls ?? c.polls }
+                : c));
+            saveAllChats(updated);
+            setActiveChat((ac) => (ac?.id === chatId ? updated.find((c) => c.id === chatId) ?? ac : ac));
+            return updated;
+        });
+        if (cursors && Object.keys(cursors).length) void saveChatKnowledgeCursors(cursors);
     };
 
     const handleStartChat = (selected) => {
@@ -2122,7 +2416,7 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
             <Presence open={showSelector}><CountrySelectorModal countries={availableCountries} loading={loadingCountries} onStart={handleStartChat} onCancel={() => setShowSelector(false)} /></Presence>
 
             {activeChat && Array.isArray(activeChat.countries) && activeChat.countries.length > 0 ? (
-                <ConversationView chat={activeChat} playerCountry={playerCountry} gameDate={gameDate} onDelete={() => handleDeleteChat(activeChat.id)} onBack={() => setActiveChat(null)} onMessagesUpdate={handleMessagesUpdate}
+                <ConversationView chat={activeChat} playerCountry={playerCountry} gameDate={gameDate} onDelete={() => handleDeleteChat(activeChat.id)} onBack={() => setActiveChat(null)} onMessagesUpdate={handleMessagesUpdate} onThreadUpdate={handleThreadUpdate}
                 unread={unreadIds.has(String(activeChat.id))} onToggleRead={() => toggleActiveChatRead(activeChat)}
                 draft={composerDraft?.chatId === activeChat.id ? composerDraft.text : ""}
                 onDraftApplied={() => setComposerDraft(null)} />
@@ -2393,8 +2687,13 @@ const Chat = ({ hovered, setHovered, isOpen, onToggle }) => {
         let cancelled = false;
         const check = async (provided = null, { force = false } = {}) => {
             try {
-                const saved = provided ?? await loadAllChats({ force });
-                if (cancelled || !Array.isArray(saved)) return;
+                const stored = provided ?? await loadAllChats({ force });
+                if (cancelled || !Array.isArray(stored)) return;
+                // A letter an unseen event delivered announces itself when the
+                // reveal reaches that event, not when the turn is written
+                // (runtime/unseenEvents.js) — the toast would say what the
+                // reveal is about to show.
+                const saved = withoutUnseenChats(stored, unseenEventIdsFor(await readWorldStateView().catch(() => null)));
 
                 const open = saved.filter((chat) =>
                     chat.status !== "closed" &&
@@ -2581,6 +2880,8 @@ const Chat = ({ hovered, setHovered, isOpen, onToggle }) => {
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("oh:runtime-json-updated", onRuntimeUpdate);
         window.addEventListener("oh:diplomacy-chats-updated", onExternalChatUpdate);
+        // A reveal step may uncover a letter the turn delivered.
+        window.addEventListener(UNSEEN_EVENTS_CHANGED, onExternalChatUpdate);
         // A save switch is a different set of threads: drop the baseline and the
         // pending toasts, and re-seed from the new save without announcing it.
         const onActiveGameChanged = () => {
@@ -2600,6 +2901,7 @@ const Chat = ({ hovered, setHovered, isOpen, onToggle }) => {
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("oh:runtime-json-updated", onRuntimeUpdate);
             window.removeEventListener("oh:diplomacy-chats-updated", onExternalChatUpdate);
+            window.removeEventListener(UNSEEN_EVENTS_CHANGED, onExternalChatUpdate);
             window.removeEventListener("oh:active-game-changed", onActiveGameChanged);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3030,8 +3332,10 @@ const Toolbar = memo(({ onOpenAdvisor, activePanel, onTogglePanel, mapRef }) => 
     const [hoveredChat, setHoveredChat]       = useState(false);
     const [hoveredActions, setHoveredActions] = useState(false);
     const [hoveredProjects, setHoveredProjects] = useState(false);
+    // The dock grows by one button per launcher; its geometry lives in hudDock.js
+    // so the Search control beside it moves with it.
     return (
-        <div style={{ position: "fixed", bottom: "0.5rem", left: "0.5rem", height: "4rem", width: "12.8rem", gap: "0.75rem", padding: "0 0.1rem", backgroundColor: "var(--oh-hud-bg)", backdropFilter: "var(--oh-hud-blur)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontFamily: "sans-serif", borderRadius: "14px", border: "1px solid var(--oh-hud-border)", boxShadow: "var(--oh-hud-shadow-soft)" }}>
+        <div style={{ position: "fixed", bottom: `${DOCK_BOTTOM_REM}rem`, left: `${DOCK_LEFT_REM}rem`, height: `${DOCK_HEIGHT_REM}rem`, width: DOCK_WIDTH, gap: `${DOCK_GAP_REM}rem`, padding: "0 0.1rem", backgroundColor: "var(--oh-hud-bg)", backdropFilter: "var(--oh-hud-blur)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontFamily: "sans-serif", borderRadius: "14px", border: "1px solid var(--oh-hud-border)", boxShadow: "var(--oh-hud-shadow-soft)" }}>
         <Chat hovered={hoveredChat} setHovered={setHoveredChat} isOpen={activePanel === "chat"} onToggle={() => onTogglePanel("chat")} />
         <Actions onOpenAdvisor={onOpenAdvisor} hovered={hoveredActions} setHovered={setHoveredActions} isOpen={activePanel === "actions"} onToggle={() => onTogglePanel("actions")} />
         <Projects onOpenAdvisor={onOpenAdvisor} mapRef={mapRef} hovered={hoveredProjects} setHovered={setHoveredProjects} isOpen={activePanel === "projects"} onToggle={() => onTogglePanel("projects")} />
