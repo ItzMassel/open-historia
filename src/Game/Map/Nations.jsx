@@ -1014,17 +1014,6 @@ const WorldMap = ({ isGlobe = false }) => {
     [puppetOverlayRows],
   );
 
-  // One case branch per Puppet, so each sphere traces in the colour of whoever
-  // holds it rather than a single generic accent.
-  const puppetOverlayColor = useMemo(() => {
-    if (!puppetOverlayRows.length) return "rgba(0,0,0,0)";
-    const branches = puppetOverlayRows.flatMap((row) => [
-      ["in", row.puppet, ["get", "ownerList"]],
-      ownerColorCss(row.overlord),
-    ]);
-    return ["case", ...branches, "rgba(0,0,0,0)"];
-  }, [puppetOverlayRows, ownerColorCss]);
-
   const visibleBoundaryFilter = useMemo(() => dirtyPoliticalOwners.length
     ? ["!", ["any", ...dirtyPoliticalOwners.map((owner) => ["in", owner, ["get", "ownerList"]])]]
     : ["all"], [dirtyPoliticalOwners]);
@@ -1349,6 +1338,19 @@ const WorldMap = ({ isGlobe = false }) => {
     },
     [resolveOwnerRgb],
   );
+
+  // One case branch per Puppet, so each sphere traces in the colour of whoever
+  // holds it rather than a single generic accent. Declared after ownerColorCss:
+  // its dependency array reads that binding on every render, and above it the
+  // map threw "Cannot access before initialization" on load.
+  const puppetOverlayColor = useMemo(() => {
+    if (!puppetOverlayRows.length) return "rgba(0,0,0,0)";
+    const branches = puppetOverlayRows.flatMap((row) => [
+      ["in", row.puppet, ["get", "ownerList"]],
+      ownerColorCss(row.overlord),
+    ]);
+    return ["case", ...branches, "rgba(0,0,0,0)"];
+  }, [puppetOverlayRows, ownerColorCss]);
 
   const workerLabelNames = useMemo(() => {
     // Worker geometry is keyed by canonical political owner, so label metadata
