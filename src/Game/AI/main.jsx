@@ -25,7 +25,7 @@ import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
-import { describePuppetBriefing, describeRole, livePuppetsFor, puppetBriefingFor } from "../../runtime/puppets.js";
+import { describePuppetBriefing, describeRole, livePuppetsFor, puppetBriefingFor, refusalPairsFor } from "../../runtime/puppets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import {
   buildDiplomaticTurnInstruction,
@@ -3105,6 +3105,21 @@ export function loadDiplomaticHistory(savedMessages) {
 
 // Participants reach these functions as either country objects (the Diplomacy
 // panel's own list) or bare name strings (the advisor's one-off send), and the
+// The speaker's own subordinations whose other party is in this conversation,
+// for the per-reply instruction's hidden REFUSED_DEMAND line (runtime/puppets.js,
+// diplomaticEnvelope.js). The player is added by hand, as for the briefing: a
+// chat's countries list only its non-player members, and the player refusing
+// their own Overlord is exactly the case a live run showed going unmarked.
+const refusalPairsForReply = async (speakingAs, participants, playerCountry = "") => {
+    const [world, game] = await Promise.all([
+        readJson(JSON_URLS.world, { defaultValue: {} }),
+        readJson(JSON_URLS.game, { defaultValue: {} }),
+    ]);
+    return refusalPairsFor(world, speakingAs, {
+        present: [...(Array.isArray(participants) ? participants : []), playerCountry || game?.country],
+    });
+};
+
 // log has to read the same either way.
 const participantLabel = (countries) => (Array.isArray(countries) ? countries : [])
     .map((country) => (typeof country === "string" ? country : country?.name || country?.code || ""))
@@ -3126,7 +3141,8 @@ export async function sendDiplomaticMessage(playerMessage, speakingAs, countries
     diplomaticHistory.push({ role: "user", parts: [{ text: withCatchUp(playerMessage, catchUp) }] });
     diplomaticHistory = compactConversationHistory(diplomaticHistory);
 
-    const turnInstruction = buildDiplomaticTurnInstruction({ speakingAs, priorMemory: diplomaticMemorySummary });
+    const refusals = await refusalPairsForReply(speakingAs, countries);
+    const turnInstruction = buildDiplomaticTurnInstruction({ speakingAs, priorMemory: diplomaticMemorySummary, refusals });
 
     const memoryContext = diplomaticMemoryContextEntry(diplomaticMemorySummary, diplomaticMemoryThroughTime, formatDateReadable);
     const historyWithInstruction = [
@@ -3196,7 +3212,8 @@ export async function sendDiplomaticMessageOnceOff({ playerMessage, speakingAs, 
     history.push({ role: "user", parts: [{ text: playerMessage }] });
     history = compactConversationHistory(history);
 
-    const turnInstruction = buildDiplomaticTurnInstruction({ speakingAs, priorMemory: priorMemory?.summary || "" });
+    const refusals = await refusalPairsForReply(speakingAs, participantNames, playerCountry);
+    const turnInstruction = buildDiplomaticTurnInstruction({ speakingAs, priorMemory: priorMemory?.summary || "", refusals });
 
     const memoryContext = diplomaticMemoryContextEntry(priorMemory?.summary, priorMemory?.time, formatDateReadable);
     const historyWithInstruction = [

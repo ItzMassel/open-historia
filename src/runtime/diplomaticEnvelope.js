@@ -111,7 +111,40 @@ export const diplomaticMemoryContextEntry = (summary, throughTime = "", formatDa
 // The per-turn instruction: the voice, the memory contract, the optional
 // reaction. The memory value must preserve modal force and attribution
 // exactly, because the simulator later acts on who committed to what.
-export const buildDiplomaticTurnInstruction = ({ speakingAs, priorMemory = "" } = {}) => {
+// The REFUSED_DEMAND line, taught HERE — in the per-reply instruction, in an
+// exact format, beside the two hidden lines that already work — and not in the
+// system prompt, where a live run showed an Overlord answer the player's flat
+// refusal with "Belarus's refusal is noted" and never mark it: the model follows
+// the output contract it is given at the moment it writes, and the refusal line
+// was not in it.
+//
+// Offered ONLY to a speaker party to a subordination with someone in the room,
+// and by NAME. Offered to everyone, it is a line a model can emit for nothing,
+// and every false mark costs a Puppet Loyalty it never forfeited. `refusals` is
+// [{ role: "puppet" | "overlord", counterpart }] — the speaker's own
+// arrangements whose other party is present (runtime/puppets.js).
+const refusalInstruction = (voice, refusals) => {
+  const lines = [];
+  for (const entry of Array.isArray(refusals) ? refusals : []) {
+    const counterpart = clean(entry?.counterpart);
+    if (!counterpart) continue;
+    if (entry.role === "puppet") {
+      lines.push(`- If the message you are answering is a demand from ${counterpart} — your overlord — and your reply REFUSES it, add this line:
+REFUSED_DEMAND:${counterpart} -> ${voice}`);
+    } else if (entry.role === "overlord") {
+      lines.push(`- If the message you are answering is ${counterpart} — your puppet state — REFUSING a demand you made of it, add this line:
+REFUSED_DEMAND:${voice} -> ${counterpart}`);
+    }
+  }
+  if (!lines.length) return "";
+  return `
+
+If, and only if, this reply is about a refused DEMAND between an overlord and its puppet state, append ONE more hidden line after DIPLOMATIC_MEMORY in this exact format:
+${lines.join("\n")}
+A demand is an overlord telling its own puppet to do something. Do NOT add it for an ordinary request, for a demand that is being accepted or only stalled, or when nothing was demanded. Say the refusal in your visible reply as well; this line is bookkeeping the player never sees.`;
+};
+
+export const buildDiplomaticTurnInstruction = ({ speakingAs, priorMemory = "", refusals = [] } = {}) => {
   const voice = clean(speakingAs) || "the leader";
   const memory = clean(priorMemory) || "No durable memory has been established yet.";
   return `[It is now ${voice}'s turn to respond to the above. Respond only as the leader of ${voice}, naturally, without prefixing your country name.
@@ -134,5 +167,5 @@ ${memory}
 
 Optionally, if the visible reply warrants an emotional reaction (surprise, offense, delight, suspicion, confusion etc.), append a single line AFTER DIPLOMATIC_MEMORY in this exact format:
 REACTION:<emoji>
-- use only a single emoji in utf-8 format after the colon, no spaces, no extra text. Otherwise omit REACTION entirely.]`;
+- use only a single emoji in utf-8 format after the colon, no spaces, no extra text. Otherwise omit REACTION entirely.${refusalInstruction(voice, refusals)}]`;
 };

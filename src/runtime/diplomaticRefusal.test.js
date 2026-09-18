@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDiplomaticEnvelope } from "./diplomaticEnvelope.js";
+import { buildDiplomaticTurnInstruction, parseDiplomaticEnvelope } from "./diplomaticEnvelope.js";
 
 // A demand is negotiable text, so the engine cannot see a refusal by reading the
 // reply. REFUSED_DEMAND is the signal that makes the one deterministic Loyalty
@@ -47,4 +47,45 @@ test("the refusal survives alongside the reaction and the durable memory", () =>
   assert.equal(reaction, "😠");
   assert.match(memorySummary, /Warsaw refused/);
   assert.doesNotMatch(reply, /REFUSED_DEMAND|DIPLOMATIC_MEMORY|REACTION/);
+});
+
+// WHERE THE MARKER IS TAUGHT. A live run on a real model showed an Overlord
+// answer the player's flat refusal with "Belarus's refusal is noted" — and not
+// mark it. The instruction was at the tail of the SYSTEM prompt, while the two
+// hidden lines that do work (DIPLOMATIC_MEMORY, REACTION) are taught in the
+// per-reply instruction, in an exact format, at the moment the model writes. So
+// that is where it lives now, naming the actual parties, and only when the
+// speaker is party to a subordination with someone in the room.
+
+test("a Puppet is told, by name, when to mark refusing its Overlord", () => {
+  const text = buildDiplomaticTurnInstruction({
+    speakingAs: "Belarus",
+    refusals: [{ role: "puppet", counterpart: "Russia" }],
+  });
+  assert.match(text, /REFUSED_DEMAND:Russia -> Belarus/);
+  assert.match(text, /demand from Russia/);
+});
+
+test("an Overlord is told, by name, to mark its Puppet's refusal", () => {
+  const text = buildDiplomaticTurnInstruction({
+    speakingAs: "Russia",
+    refusals: [{ role: "overlord", counterpart: "Belarus" }],
+  });
+  assert.match(text, /REFUSED_DEMAND:Russia -> Belarus/);
+  assert.match(text, /Belarus.*refus/i);
+});
+
+test("a speaker party to no subordination in the room is never offered the line", () => {
+  // Offered to everyone, it is a line a model can emit for nothing — and every
+  // false mark costs a Puppet Loyalty it never forfeited.
+  assert.doesNotMatch(buildDiplomaticTurnInstruction({ speakingAs: "France" }), /REFUSED_DEMAND/);
+  assert.doesNotMatch(buildDiplomaticTurnInstruction({ speakingAs: "France", refusals: [] }), /REFUSED_DEMAND/);
+});
+
+test("the line the instruction teaches is the line the parser reads", () => {
+  const text = buildDiplomaticTurnInstruction({ speakingAs: "Belarus", refusals: [{ role: "puppet", counterpart: "Russia" }] });
+  const taught = text.match(/REFUSED_DEMAND:[^\n]+/)[0];
+  const { refusedOverlord, refusedPuppet } = parseDiplomaticEnvelope(`We will not.\n${taught}`);
+  assert.equal(refusedOverlord, "Russia");
+  assert.equal(refusedPuppet, "Belarus");
 });
