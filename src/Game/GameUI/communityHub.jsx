@@ -9,7 +9,7 @@
 // server's /api/hub proxy. Publishing exports the chosen scenario locally and
 // opens a prefilled hub post where the author drags the bundle in.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   exportScenarioBundle,
   importScenarioBundle,
@@ -26,6 +26,7 @@ import {
 import { unzipBundle, zipBundle } from "../../runtime/bundleZip.js";
 import { sha256Hex } from "../../runtime/basemapLibrary.js";
 import { listFlags } from "../../runtime/flagLibrary.js";
+import ScenarioMapPreview, { PREVIEW_ASPECT_RATIO, PREVIEW_FRAME_STYLE } from "./ScenarioMapPreview.jsx";
 
 // The one and only hub. Not configurable by design.
 const HUB_OWNER = "Open-Historia";
@@ -437,7 +438,116 @@ const StatusBanner = ({ notice, error }) => (
   </>
 );
 
-const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
+// The scenario's actual region geometry + ownership, pulled out of the hub
+// bundle for ScenarioMapPreview. Bundles ship no geometry for a re-ownership
+// scenario (Fallout, WWII…) — ScenarioMapPreview falls back to the stock world
+// repainted with regionOwnershipOverrides, same as the in-game country picker.
+const extractPreviewGeometry = (bundle) => ({
+  regionsGeojson: bundle?.assets?.regionsGeojson?.mode === "embedded"
+    ? bundle.assets.regionsGeojson.data
+    : null,
+  ownerOverrides: bundle?.data?.world?.regionOwnershipOverrides ?? null,
+  // The scenario's polity registry and palette. Without these an artificial
+  // scenario renders as the real world wearing procedural colours: a renamed
+  // polity splits in two (its token AND its display name both owning ground),
+  // and authored colours are ignored.
+  polityOverrides: bundle?.data?.world?.polityOverrides ?? null,
+  colors: bundle?.assets?.colors?.mode === "embedded" ? bundle.assets.colors.data : null,
+});
+
+// The community hub's own bundle fetch (network + the server's /api/hub/file
+// proxy) is a separate hop from ScenarioMapPreview's internal stock-geometry
+// fetch, and can hang or fail on its own — this bounds it so "World map" never
+// sits over a skeleton forever.
+const HUB_BUNDLE_PREVIEW_TIMEOUT_MS = 15000;
+
+const withPreviewTimeout = (promise, ms) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), ms)),
+]);
+
+// A cheap, static rendering of the post's actual scenario map — the whole
+// world, zoomed out, with country names, like the game's own overview — sits
+// at the bottom of the detail view below the description/Import row. Shows a
+// skeleton immediately (so it's visibly loading, not just an empty heading)
+// while the scenario's bundle downloads, and a explicit failure message
+// instead of hanging if that download errors or takes too long.
+const ScenarioMapPreviewSection = ({ post, loadBundle }) => {
+  // "loading" | "ready" | "error"
+  const [status, setStatus] = useState("loading");
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setPreview(null);
+    withPreviewTimeout(loadBundle(post), HUB_BUNDLE_PREVIEW_TIMEOUT_MS)
+      .then((bundle) => {
+        if (cancelled) return;
+        setPreview(extractPreviewGeometry(bundle));
+        setStatus("ready");
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        console.error("Scenario map preview: failed to download the scenario bundle:", loadError);
+        setStatus("error");
+      });
+    return () => { cancelled = true; };
+  }, [post, loadBundle]);
+
+  return (
+    <div style={{ marginTop: "1.3rem" }}>
+      <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        World map
+      </div>
+      {status === "ready" ? (
+        <ScenarioMapPreview
+          regionsGeojson={preview.regionsGeojson}
+          ownerOverrides={preview.ownerOverrides}
+          polityOverrides={preview.polityOverrides}
+          colors={preview.colors}
+        />
+      ) : (
+        <div style={PREVIEW_FRAME_STYLE}>
+          <div
+            style={{
+              alignItems: "center",
+              aspectRatio: PREVIEW_ASPECT_RATIO,
+              background: "#16161a",
+              borderRadius: "10px",
+              color: "rgba(255,255,255,0.4)",
+              display: "flex",
+              fontSize: "0.78rem",
+              justifyContent: "center",
+              overflow: "hidden",
+              position: "relative",
+              textAlign: "center",
+              width: "100%",
+            }}
+          >
+            {status === "loading" ? (
+              <>
+                <style>{"@keyframes scenarioMapPreviewSectionShimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }"}</style>
+                <div
+                  style={{
+                    animation: "scenarioMapPreviewSectionShimmer 1.4s ease-in-out infinite",
+                    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)",
+                    inset: 0,
+                    position: "absolute",
+                  }}
+                />
+              </>
+            ) : (
+              "No map preview available."
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundle }) => (
   <div style={{ color: "#fff" }}>
     <button
       type="button"
@@ -501,6 +611,8 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
         👍 Like / 💬 Comment ↗
       </a>
     </div>
+
+    <ScenarioMapPreviewSection post={post} loadBundle={loadBundle} />
   </div>
 );
 
@@ -525,6 +637,22 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
   useEffect(() => {
     selectedPostRef.current = selectedPost;
   }, [selectedPost]);
+
+  // Opening a post's detail view downloads its bundle to draw the map preview
+  // — the same download Import needs — so the result is cached here and reused
+  // if the user then hits Import, instead of fetching the bundle twice.
+  const bundleCacheRef = useRef(new Map());
+  // Stable identity (bundleCacheRef never changes) so the detail view's preview
+  // effect doesn't refire — and refetch nothing, but still flicker — on every
+  // unrelated re-render (banners, busyId…) of this panel.
+  const loadHubBundle = useCallback((post) => {
+    const cached = bundleCacheRef.current.get(post.id);
+    if (cached) return cached;
+    const promise = downloadHubBundle(post.bundleUrl);
+    bundleCacheRef.current.set(post.id, promise);
+    promise.catch(() => bundleCacheRef.current.delete(post.id)); // don't cache a failure
+    return promise;
+  }, []);
 
   const clearBanners = () => {
     setNotice(null);
@@ -625,7 +753,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
     setBusyId(post.id);
     clearBanners();
     try {
-      const bundle = await downloadHubBundle(post.bundleUrl);
+      const bundle = await loadHubBundle(post);
       // Provenance: which post and which exact bundle file this copy came from.
       // The library's Scenarios tab compares this against the post's CURRENT
       // bundle URL to offer an Update button — and drops it the moment the
@@ -754,6 +882,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
           onBack={backToGrid}
           notice={notice}
           error={error}
+          loadBundle={loadHubBundle}
         />
       ) : (
         <>
