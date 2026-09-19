@@ -90,6 +90,24 @@ const normalizeRegionOwners = (collection) => ({
 // per-region worker state to avoid regions vanishing between tiles, which is
 // a materially bigger change than this preview warrants).
 const REFINED_REGION_ZOOM = 3; // 8x8 = 64 tiles world-wide; still a bounded, one-time fetch
+
+// One retry per tile: 64 requests fired at once occasionally drops one to a
+// transient network hiccup, and a silently-dropped tile is a whole tile-sized
+// rectangle of land that just vanishes from the map — the "big coherent
+// unoccupied part" failure mode, as opposed to the tile-seam one above.
+const fetchTileWithRetry = async (pmtiles, z, x, y) => {
+  try {
+    return await pmtiles.getZxy(z, x, y);
+  } catch {
+    try {
+      return await pmtiles.getZxy(z, x, y);
+    } catch (error) {
+      console.warn(`Scenario map preview: tile ${z}/${x}/${y} failed twice; that patch of the map will be blank:`, error);
+      return null;
+    }
+  }
+};
+
 const loadRefinedStockRegions = async () => {
   const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
   const span = 2 ** REFINED_REGION_ZOOM;
@@ -98,10 +116,9 @@ const loadRefinedStockRegions = async () => {
     for (let y = 0; y < span; y += 1) coords.push([x, y]);
   }
   const tiles = await Promise.all(
-    coords.map(([x, y]) => pmtiles.getZxy(REFINED_REGION_ZOOM, x, y).catch(() => null)),
+    coords.map(([x, y]) => fetchTileWithRetry(pmtiles, REFINED_REGION_ZOOM, x, y)),
   );
 
-  const seen = new Set();
   const features = [];
   for (let index = 0; index < tiles.length; index += 1) {
     const tileData = tiles[index];
@@ -113,11 +130,17 @@ const loadRefinedStockRegions = async () => {
     for (let featureIndex = 0; featureIndex < layer.length; featureIndex += 1) {
       const feature = layer.feature(featureIndex);
       const props = feature.properties ?? {};
-      // A region split across a tile boundary appears in each neighbouring
-      // tile; keep the first copy only.
+      // A region whose polygon crosses a tile boundary is CLIPPED per tile —
+      // each tile holds only the fragment of it that falls inside that tile,
+      // not a duplicate of the whole thing. Keeping only the "first" tile's
+      // copy (as this used to) throws away every other fragment, which is
+      // exactly "unoccupied land cutting through the middle of a country" at
+      // tile seams. Every fragment is kept here and pushed through as its own
+      // feature; derivePolitySurfaces unions all of one owner's polygons
+      // together regardless of how many pieces they arrive in, so the region
+      // ends up whole again downstream.
       const id = props.GID_1 || props.gid_1 || props.HASC_1 || props.fid;
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
+      if (!id) continue;
       // VectorTileFeature#toGeoJSON is (x, y, z) — NOT (z, x, y). Swapping
       // those args is exactly what scattered every tile's geometry away from
       // where it actually belongs.
