@@ -2961,6 +2961,38 @@ const LibraryTopBar = () => {
             </div>
           </div>
 
+          {/* Card-level actions (Archive, Remove) have no editor open to show
+              editorError inside — EditorDrawer renders nothing without one — so
+              without this a failed request there looked like the button did
+              nothing at all. Suppressed while the drawer IS open so the error
+              isn't shown twice. */}
+          {!editorDetails && (editorError || error) && (
+            <div
+              style={{
+                alignItems: "center",
+                background: "rgba(248,113,113,0.14)",
+                border: "1px solid rgba(248,113,113,0.34)",
+                color: "#fecaca",
+                display: "flex",
+                fontSize: "0.85rem",
+                gap: "0.7rem",
+                justifyContent: "space-between",
+                margin: isMobile ? "0.8rem 0.8rem 0" : "0.9rem 1.6rem 0",
+                padding: "0.75rem 0.9rem",
+                borderRadius: "12px",
+              }}
+            >
+              <span>{editorError || error}</span>
+              <button
+                onClick={() => setEditorError(null)}
+                style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.08)", flexShrink: 0, minHeight: "1.8rem", padding: "0 0.6rem" }}
+                type="button"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "1.1rem 0.8rem 2.5rem" : "1.5rem 1.6rem 3rem" }}>
             {activeTab === "community" ? (
               <Suspense
