@@ -164,14 +164,14 @@ export const ApiSetupPrompt = ({ providerLabel = "the selected provider", missin
           borderRadius: "16px",
           boxShadow: "var(--oh-hud-shadow)",
           color: "white",
-          fontFamily: "sans-serif",
+          fontFamily: "var(--oh-serif)",
           maxHeight: "calc(100vh - 2rem)",
           overflowY: "auto",
           padding: "1.35rem 1.4rem 1.2rem",
           width: "min(34rem, 100%)",
         }}
       >
-        <div style={{ fontSize: "1.05rem", fontWeight: 900 }}>Set up your AI provider</div>
+        <div style={{ fontFamily: "var(--oh-display)", fontSize: "1.05rem", fontWeight: 900 }}>Set up your AI provider</div>
         <div style={{ color: "rgba(255,255,255,0.64)", fontSize: "0.8rem", lineHeight: 1.55, marginTop: "0.5rem" }}>
           Open Historia writes every turn, advisor reply and diplomatic message with an AI model, and {providerLabel} has {missing} missing.
           Until it is set, time skips fall back to canned events and the advisor cannot answer. Paste your details below and you are ready to play.
@@ -188,7 +188,7 @@ export const ApiSetupPrompt = ({ providerLabel = "the selected provider", missin
         >
           <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: "0.86rem", fontWeight: 800 }}>New to API keys?</div>
+              <div style={{ fontFamily: "var(--oh-display)", fontSize: "0.86rem", fontWeight: 800 }}>New to API keys?</div>
               <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.72rem", lineHeight: 1.45, marginTop: "0.15rem" }}>
                 A Gemini key is free. The video walks through getting one; the button opens the page where it is made.
               </div>

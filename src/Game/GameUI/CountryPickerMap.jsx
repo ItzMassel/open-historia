@@ -336,7 +336,7 @@ const CountryPickerMap = ({
             background: "rgba(0,0,0,0.28)",
             color: "#fff",
             outline: "none",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             fontSize: "0.85rem",
           }}
         />

@@ -261,6 +261,7 @@ const pillButton = {
 
 const rowTitleStyle = {
   color: "rgba(255,255,255,0.9)",
+  fontFamily: "var(--oh-display)",
   fontSize: "0.95rem",
   fontWeight: 800,
   letterSpacing: "-0.01em",
@@ -455,7 +456,7 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
       {post.avatarUrl && (
         <img src={post.avatarUrl} alt={post.author} style={{ borderRadius: "50%", height: "1.8rem", width: "1.8rem" }} />
       )}
-      <h3 style={{ fontSize: "1.3rem", fontWeight: 800, margin: 0 }}>
+      <h3 style={{ fontFamily: "var(--oh-display)", fontSize: "1.3rem", fontWeight: 800, margin: 0 }}>
         {post.pinned ? "📌 " : ""}{post.title}
       </h3>
     </div>

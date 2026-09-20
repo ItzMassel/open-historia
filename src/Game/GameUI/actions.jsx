@@ -212,7 +212,7 @@ const SuggestionCard = ({ topic, onQueue, queuedIds }) => (
                 borderRadius: "10px",
                 color: "rgba(255,255,255,0.9)",
                 cursor: isQueued ? "default" : "pointer",
-                fontFamily: "sans-serif",
+                fontFamily: "var(--oh-serif)",
                 padding: "0.55rem 0.7rem",
                 textAlign: "left",
             }}
@@ -475,7 +475,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             color: "white",
             display: "flex",
             flexDirection: "column",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             // Grow to use the height a taller screen offers (leaving ~16rem for the
             // top bar), never dropping below a usable 30rem floor for laptops/phones,
             // and never past the 9rem the top UI needs (so it can't overflow up).
@@ -501,7 +501,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             padding: "1rem 1.25rem 0.75rem",
         }}
         >
-        <span style={{ fontSize: "1rem", fontWeight: 700, letterSpacing: "0.01em" }}>Actions</span>
+        <span style={{ fontFamily: "var(--oh-display)", fontSize: "1rem", fontWeight: 700, letterSpacing: "0.01em" }}>Actions</span>
         <button
         type="button"
         onClick={onClose}
@@ -687,7 +687,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             borderRadius: "10px",
             boxSizing: "border-box",
             color: "white",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             fontSize: "0.82rem",
             outline: "none",
             padding: "0.7rem 2.8rem 0.7rem 0.85rem",

@@ -28,7 +28,7 @@ const baseStyle = {
     alignItems: "center",
     justifyContent: "center",
     color: "white",
-    fontFamily: "sans-serif",
+    fontFamily: "var(--oh-serif)",
     borderRadius: "12px",
     border: "1px solid rgba(255,255,255,0.1)",
     boxShadow: "0 4px 6px -1px rgba(0,0,0,0.2)",
@@ -455,7 +455,7 @@ const AdvisorDraftSend = ({ draft, onDraft }) => {
             borderRadius: "8px",
             color: handedOff ? "rgba(167,243,208,0.95)" : "rgba(191,219,254,0.95)",
             cursor: "pointer",
-            fontFamily: "sans-serif", fontSize: "0.76rem", fontWeight: 600, padding: "0.35rem 0.65rem",
+            fontFamily: "var(--oh-serif)", fontSize: "0.76rem", fontWeight: 600, padding: "0.35rem 0.65rem",
             textAlign: "left",
         }}>
         {handedOff ? "✓ In Diplomacy — press send there" : `✉️ Draft to ${draft.country}`}
@@ -489,7 +489,7 @@ const AdvisorDeployPlace = ({ deployment, placed, onPlace }) => {
             borderRadius: "8px",
             color: status === "placed" ? "rgba(167,243,208,0.95)" : "rgba(216,196,255,0.95)",
             cursor: busy ? "default" : "pointer",
-            fontFamily: "sans-serif", fontSize: "0.76rem", fontWeight: 600, padding: "0.35rem 0.65rem",
+            fontFamily: "var(--oh-serif)", fontSize: "0.76rem", fontWeight: 600, padding: "0.35rem 0.65rem",
         }}>
         {status === "placed"
             ? `✓ ${deployment.name} placed`
@@ -629,7 +629,7 @@ const TabButton = ({ icon, label, active, onClick }) => (
         color: active ? "white" : "rgba(255,255,255,0.55)",
         cursor: "pointer",
         display: "flex",
-        fontFamily: "sans-serif",
+        fontFamily: "var(--oh-serif)",
         fontSize: "0.88rem",
         fontWeight: active ? 700 : 500,
         gap: "0.4rem",
@@ -1194,7 +1194,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             boxShadow: isAdvisorOpen ? "-4px 0 24px rgba(0,0,0,0.4)" : "none",
             transition: `transform ${ADVISOR_SLIDE}, box-shadow ${ADVISOR_SLIDE}`,
             display: "flex", flexDirection: "column",
-            color: "white", fontFamily: "sans-serif", overflow: "hidden",
+            color: "white", fontFamily: "var(--oh-serif)", overflow: "hidden",
         }}>
         {/* Drag the left edge to resize the drawer (main.jsx clamps + persists). */}
         {typeof onResize === "function" && (
@@ -1278,7 +1278,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             resizeTextarea();
         }}
         onKeyDown={handleKeyDown}
-        style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "10px", color: "white", fontSize: "0.875rem", padding: "0.6rem 0.75rem", resize: "none", outline: "none", fontFamily: "sans-serif", lineHeight: "1.5", overflowY: "auto", scrollbarWidth: "none", transition: "border-color 0.2s" }}
+        style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "10px", color: "white", fontSize: "0.875rem", padding: "0.6rem 0.75rem", resize: "none", outline: "none", fontFamily: "var(--oh-serif)", lineHeight: "1.5", overflowY: "auto", scrollbarWidth: "none", transition: "border-color 0.2s" }}
         onFocus={e => e.target.style.borderColor = "rgba(59,130,246,0.6)"}
         onBlur={e => e.target.style.borderColor = "rgba(255,255,255,0.15)"}
         />

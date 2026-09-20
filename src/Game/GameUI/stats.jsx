@@ -822,7 +822,7 @@ const AdvancedStatsModal = ({
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ alignItems: "baseline", display: "flex", flexWrap: "wrap", gap: "0.35rem 0.65rem" }}>
-                            <span style={{ color: "#f8fafc", fontSize: "1rem", fontWeight: 900 }}>Advanced Statistics</span>
+                            <span style={{ color: "#f8fafc", fontFamily: "var(--oh-display)", fontSize: "1rem", fontWeight: 900 }}>Advanced Statistics</span>
                             <span style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.76rem", fontWeight: 700 }}>{countryName}</span>
                         </div>
                         <div data-no-translate style={{ color: "rgba(255,255,255,0.32)", fontSize: "0.64rem", marginTop: "0.15rem" }}>{sampleSpan} · {visibleSamples.length} snapshot{visibleSamples.length === 1 ? "" : "s"}</div>
@@ -999,7 +999,7 @@ const HistoricalTrackingModal = ({
                     <div style={{ alignItems: "center", display: "flex", gap: "0.8rem", minWidth: 0 }}>
                         <div style={{ alignItems: "center", backgroundColor: "rgba(234,179,8,0.12)", border: "1px solid rgba(250,204,21,0.22)", borderRadius: "12px", color: "#fbbf24", display: "inline-flex", flexShrink: 0, fontSize: "1.2rem", height: "2.5rem", justifyContent: "center", width: "2.5rem" }}>⚙</div>
                         <div style={{ minWidth: 0 }}>
-                            <div style={{ color: "#f8fafc", fontSize: "1.15rem", fontWeight: 850 }}>Historical tracking</div>
+                            <div style={{ color: "#f8fafc", fontFamily: "var(--oh-display)", fontSize: "1.15rem", fontWeight: 850 }}>Historical tracking</div>
                             <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.75rem", marginTop: "0.12rem" }}>
                                 Choose how often Stats should re-check tracked countries, and which countries you want on your long-term graphs.
                             </div>

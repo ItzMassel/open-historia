@@ -315,7 +315,7 @@ const CheatsPanel = ({ open, onClose, onOpenForces }) => {
             ←
             </button>
         )}
-        <div style={{ fontSize: "1rem", fontWeight: 800 }}>{title}</div>
+        <div style={{ fontFamily: "var(--oh-display)", fontSize: "1rem", fontWeight: 800 }}>{title}</div>
         </div>
         <button type="button" onClick={onClose} style={{ ...buttonStyle, padding: "0.25rem 0.55rem" }}>✕</button>
         </div>
@@ -326,7 +326,7 @@ const CheatsPanel = ({ open, onClose, onOpenForces }) => {
     return (
         <>
         {clickMode && (
-            <div className="oh-hud-popover" style={{ alignItems: "center", display: "flex", gap: "0.6rem", background: "rgba(24, 24, 27, 0.96)", border: "1px solid rgba(139,92,246,0.32)", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.35)", color: "#fff", fontFamily: "sans-serif", fontSize: "0.85rem", left: "50%", padding: "0.6rem 0.9rem", position: "fixed", top: PANEL_TOP, transform: "translateX(-50%)", zIndex: 10070 }}>
+            <div className="oh-hud-popover" style={{ alignItems: "center", display: "flex", gap: "0.6rem", background: "rgba(24, 24, 27, 0.96)", border: "1px solid rgba(139,92,246,0.32)", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.35)", color: "#fff", fontFamily: "var(--oh-serif)", fontSize: "0.85rem", left: "50%", padding: "0.6rem 0.9rem", position: "fixed", top: PANEL_TOP, transform: "translateX(-50%)", zIndex: 10070 }}>
             <span>{clickMode.label}</span>
             <button type="button" onClick={endClickMode} style={{ ...primaryButtonStyle, padding: "0.3rem 0.6rem" }}>Done</button>
             </div>
@@ -343,7 +343,7 @@ const CheatsPanel = ({ open, onClose, onOpenForces }) => {
             color: "white",
             display: clickMode ? "none" : "flex",
             flexDirection: "column",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             maxHeight: `calc(100vh - ${PANEL_TOP} - 1rem)`,
             overflow: "hidden",
             padding: "0.9rem",
@@ -370,7 +370,7 @@ const CheatsPanel = ({ open, onClose, onOpenForces }) => {
             }}>
                 <div style={{ ...iconTileStyle, flexBasis: "2.15rem", height: "2.15rem", width: "2.15rem" }}>⌘</div>
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: "0.78rem", fontWeight: 800 }}>Canonical world tools</div>
+                    <div style={{ fontFamily: "var(--oh-display)", fontSize: "0.78rem", fontWeight: 800 }}>Canonical world tools</div>
                     <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.66rem", lineHeight: 1.35, marginTop: "0.08rem" }}>
                         Edits become the current canonical state, not permanent locks. Normal simulation remains free to evolve them afterward.
                     </div>

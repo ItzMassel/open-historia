@@ -59,7 +59,7 @@ const surface = {
   border: "1px solid rgba(255,255,255,0.12)",
   borderRadius: "12px",
   color: "white",
-  fontFamily: "sans-serif",
+  fontFamily: "var(--oh-serif)",
   boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
 };
 
@@ -227,7 +227,7 @@ export const ForcesPanel = ({ mapRef, topOffset = "0px", open = false, onToggle 
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <strong style={{ fontSize: "14px" }}>Forces</strong>
+            <strong style={{ fontFamily: "var(--oh-display)", fontSize: "14px" }}>Forces</strong>
             <button
               onClick={() => setOpen(false)}
               style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer", fontSize: "14px" }}

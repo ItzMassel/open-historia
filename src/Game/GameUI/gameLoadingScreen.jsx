@@ -99,7 +99,7 @@ export const GameLoadingScreen = ({ gameName = "", scenarioName = "", countryNam
       background: "radial-gradient(circle at 50% 42%, #1d1d20 0%, #0c0c0e 68%)",
       color: "white",
       display: "flex",
-      fontFamily: "sans-serif",
+      fontFamily: "var(--oh-serif)",
       inset: 0,
       justifyContent: "center",
       position: "fixed",
@@ -110,7 +110,7 @@ export const GameLoadingScreen = ({ gameName = "", scenarioName = "", countryNam
   >
     <div style={{ padding: "1rem", textAlign: "center" }}>
       <img className="oh-loading-logo" src="/logo.png" alt="" style={{ height: "6.5rem", width: "6.5rem" }} />
-      <div style={{ fontSize: "1.15rem", fontWeight: 900, letterSpacing: "0.02em", marginTop: "1.15rem" }}>
+      <div style={{ fontFamily: "var(--oh-display)", fontSize: "1.15rem", fontWeight: 900, letterSpacing: "0.02em", marginTop: "1.15rem" }}>
         {gameName || scenarioName || "Open Historia"}
       </div>
       {(scenarioName || countryName) && (

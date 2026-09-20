@@ -157,7 +157,7 @@ const panelSurface = {
     borderRadius: "18px",
     boxShadow: "var(--oh-hud-shadow)",
     color: "white",
-    fontFamily: "sans-serif",
+    fontFamily: "var(--oh-serif)",
     overflow: "hidden",
     position: "fixed",
     width: PANEL_WIDTH,
@@ -173,7 +173,7 @@ const widgetSurface = {
     boxShadow: "var(--oh-hud-shadow-soft)",
     color: "white",
     display: "flex",
-    fontFamily: "sans-serif",
+    fontFamily: "var(--oh-serif)",
     gap: "0.25rem",
     height: "3.5rem",
     justifyContent: "center",
@@ -766,7 +766,7 @@ const PanelChrome = ({
                 </div>
             )}
             {title && (
-                <div style={{ color: "rgba(255,255,255,0.96)", fontSize: "1rem", fontWeight: 700 }}>
+                <div style={{ color: "rgba(255,255,255,0.96)", fontFamily: "var(--oh-display)", fontSize: "1rem", fontWeight: 700 }}>
                 {title}
                 </div>
             )}
@@ -1459,7 +1459,7 @@ const TimelineHistoryPanel = ({
                     color: report.done ? "#86efac" : "#fde68a",
                     cursor: report.busy ? "default" : "pointer",
                     display: "flex",
-                    fontFamily: "sans-serif",
+                    fontFamily: "var(--oh-serif)",
                     fontSize: "0.72rem",
                     fontWeight: 600,
                     gap: "0.35rem",
@@ -1489,7 +1489,7 @@ const TimelineHistoryPanel = ({
                     color: "#fcd9a8",
                     cursor: rollbackState === "working" ? "default" : "pointer",
                     display: "flex",
-                    fontFamily: "sans-serif",
+                    fontFamily: "var(--oh-serif)",
                     fontSize: "0.72rem",
                     fontWeight: 600,
                     gap: "0.35rem",

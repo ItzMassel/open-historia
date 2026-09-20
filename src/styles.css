@@ -11,11 +11,16 @@ body {
   overscroll-behavior: none;
   background: #02050a;
   color: #f6f6f7;
-  font-family: "Segoe UI", sans-serif;
+  font-family: var(--oh-serif);
 }
 
 * {
   box-sizing: border-box;
+}
+
+:root {
+  --oh-serif: 'EB Garamond', Georgia, 'Times New Roman', serif;
+  --oh-display: 'Cinzel', Georgia, 'Times New Roman', serif;
 }
 
 /* -------------------------------------------------------------------------

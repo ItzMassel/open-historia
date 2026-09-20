@@ -541,6 +541,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
             <div
               style={{
                 color: "#fff",
+                fontFamily: "var(--oh-display)",
                 fontSize: "2rem",
                 fontWeight: 800,
                 letterSpacing: "-0.03em",
@@ -825,7 +826,7 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
           </div>
 
           <div style={{ marginTop: "2rem" }}>
-            <div style={{ color: "#fff", fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
+            <div style={{ color: "#fff", fontFamily: "var(--oh-display)", fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
               {game.name}
             </div>
             <div style={{ color: "rgba(244,244,246,0.72)", fontSize: "0.92rem", marginTop: "0.45rem" }}>
@@ -877,7 +878,7 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
 // scrolling cards. Rows that can be legitimately empty pass emptyText.
 const MenuRow = ({ children, emptyText, title }) => (
   <div style={{ marginBottom: "1.7rem" }}>
-    <div style={{ color: "rgba(255,255,255,0.88)", fontSize: "1.02rem", fontWeight: 800, letterSpacing: "-0.01em", marginBottom: "0.7rem" }}>
+    <div style={{ color: "rgba(255,255,255,0.88)", fontFamily: "var(--oh-display)", fontSize: "1.02rem", fontWeight: 800, letterSpacing: "-0.01em", marginBottom: "0.7rem" }}>
       {title}
     </div>
     {React.Children.count(children) > 0 ? (
@@ -998,7 +999,7 @@ const EditorDrawer = ({
           <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
             {kind === "scenario" ? "Scenario" : "Game"} Editor
           </div>
-          <div style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", marginTop: "0.2rem" }}>
+          <div style={{ fontFamily: "var(--oh-display)", fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", marginTop: "0.2rem" }}>
             {record.name}
           </div>
         </div>
@@ -2439,7 +2440,7 @@ const LibraryTopBar = () => {
           style={{
             alignItems: "center",
             display: "flex",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             gap: "0.45rem",
             left: "5rem",
             position: "fixed",
@@ -2486,7 +2487,7 @@ const LibraryTopBar = () => {
           style={{
             display: "flex",
             flexDirection: "column",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             gap: "0.45rem",
             left: "0.5rem",
             position: "fixed",
@@ -2509,7 +2510,7 @@ const LibraryTopBar = () => {
         <div style={{ position: "fixed", inset: 0, zIndex: 10050 }}>
           <Suspense
             fallback={
-              <div style={{ position: "fixed", inset: 0, background: "#111113", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif" }}>
+              <div style={{ position: "fixed", inset: 0, background: "#111113", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--oh-serif)" }}>
                 Loading map editor…
               </div>
             }
@@ -2538,11 +2539,11 @@ const LibraryTopBar = () => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ ...surfaceStyle, borderRadius: 16, width: difficultyPick ? "min(440px, 92vw)" : "min(640px, 92vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", padding: "1rem", color: "#fff", fontFamily: "sans-serif", overflow: difficultyPick ? "visible" : "auto" }}
+            style={{ ...surfaceStyle, borderRadius: 16, width: difficultyPick ? "min(440px, 92vw)" : "min(640px, 92vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", padding: "1rem", color: "#fff", fontFamily: "var(--oh-serif)", overflow: difficultyPick ? "visible" : "auto" }}
           >
             {difficultyPick ? (
               <>
-                <div style={{ fontWeight: 800, fontSize: "1rem" }}>Choose your difficulty</div>
+                <div style={{ fontFamily: "var(--oh-display)", fontWeight: 800, fontSize: "1rem" }}>Choose your difficulty</div>
                 <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.75rem", margin: "0.15rem 0 0.7rem" }}>
                   How hard should the world fight back?
                 </div>
@@ -2582,7 +2583,7 @@ const LibraryTopBar = () => {
               </>
             ) : (
               <>
-                <div style={{ fontWeight: 800, fontSize: "1rem" }}>
+                <div style={{ fontFamily: "var(--oh-display)", fontWeight: 800, fontSize: "1rem" }}>
                   {pickerTab === "faction" ? "Create your faction" : "Choose your country"}
                 </div>
                 <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.75rem", margin: "0.15rem 0 0.6rem" }}>
@@ -2674,9 +2675,9 @@ const LibraryTopBar = () => {
           >
             <div
               onClick={(event) => event.stopPropagation()}
-              style={{ ...surfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
+              style={{ ...surfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "var(--oh-serif)", padding: "1.1rem", width: "min(430px, 92vw)" }}
             >
-              <div style={{ fontSize: "1rem", fontWeight: 800 }}>This game's scenario isn't here</div>
+              <div style={{ fontFamily: "var(--oh-display)", fontSize: "1rem", fontWeight: 800 }}>This game's scenario isn't here</div>
               <div style={{ color: "rgba(255,255,255,0.62)", fontSize: "0.82rem", lineHeight: 1.5, margin: "0.5rem 0 1rem" }}>
                 “{pending.name}” was played on{" "}
                 <strong style={{ color: "rgba(255,255,255,0.86)" }}>
@@ -2752,7 +2753,7 @@ const LibraryTopBar = () => {
             color: "#fff",
             display: "flex",
             flexDirection: "column",
-            fontFamily: "sans-serif",
+            fontFamily: "var(--oh-serif)",
             inset: 0,
             position: "fixed",
             zIndex: 10046,
@@ -2781,7 +2782,7 @@ const LibraryTopBar = () => {
                 <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", flexShrink: 0, height: "2.65rem", justifyContent: "center", overflow: "hidden", width: "2.65rem" }}>
                   <img alt="Open Historia" src="/logo.png" style={{ height: "1.7rem", width: "1.7rem" }} />
                 </div>
-                <div style={{ color: "#fff", fontSize: "1.05rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
+                <div style={{ color: "#fff", fontFamily: "var(--oh-display)", fontSize: "1.05rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
                   Open Historia
                 </div>
               </div>

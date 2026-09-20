@@ -155,7 +155,7 @@ const CopyButton = ({ text }) => {
 const Section = ({ title, right, children }) => (
     <div style={{ marginBottom: "1.4rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-            <h3 style={{ margin: 0, fontSize: "0.7rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "#60a5fa" }}>{title}</h3>
+            <h3 style={{ margin: 0, fontFamily: "var(--oh-display)", fontSize: "0.7rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "#60a5fa" }}>{title}</h3>
             {right}
         </div>
         {children}
@@ -553,11 +553,11 @@ export const DebugConsole = ({ open, onClose }) => {
     const emptyNote = (text) => <div style={{ color: COLORS.muted, fontSize: "0.72rem", fontStyle: "italic" }}>{text}</div>;
 
     return (
-        <div style={{ position: "fixed", inset: 0, zIndex: 10001, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", boxSizing: "border-box", fontFamily: "sans-serif" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 10001, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", boxSizing: "border-box", fontFamily: "var(--oh-serif)" }}>
             <div style={{ width: "100%", height: "100%", maxWidth: "1600px", backgroundColor: COLORS.bg, border: `2px solid ${COLORS.border}`, borderRadius: "14px", boxShadow: "0 0 80px rgba(0,0,0,0.9)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.6rem 1rem", backgroundColor: COLORS.raised, borderBottom: `2px solid ${COLORS.border}`, flexShrink: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
-                        <span style={{ fontSize: "0.8rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "white" }}>AI debug console</span>
+                        <span style={{ fontFamily: "var(--oh-display)", fontSize: "0.8rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "white" }}>AI debug console</span>
                         <span style={{ fontSize: "0.66rem", fontWeight: 700, color: COLORS.muted, backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`, padding: "0.1rem 0.5rem", borderRadius: "6px", fontFamily: MONO }}>
                             {records.length} generation{records.length === 1 ? "" : "s"}
                         </span>

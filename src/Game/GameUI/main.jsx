@@ -72,7 +72,7 @@ const baseStyle = {
   alignItems: "center",
   justifyContent: "center",
   color: "white",
-  fontFamily: "sans-serif",
+  fontFamily: "var(--oh-serif)",
   borderRadius: "14px",
   border: "1px solid var(--oh-hud-border)",
   boxShadow: "var(--oh-hud-shadow-soft)",
@@ -138,7 +138,7 @@ const WebGLWarningPopup = () => (
       >
         ⚠️
       </div>
-      <h2 style={{ margin: "0 0 0.75rem", fontSize: "1.3rem", color: "#e94560" }}>
+      <h2 style={{ margin: "0 0 0.75rem", fontFamily: "var(--oh-display)", fontSize: "1.3rem", color: "#e94560" }}>
         WebGL Not Available
       </h2>
       <p style={{ margin: "0 0 0.5rem", lineHeight: 1.6, color: "#ccc", fontSize: "0.95rem" }}>

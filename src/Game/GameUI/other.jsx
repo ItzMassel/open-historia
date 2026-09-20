@@ -17,7 +17,7 @@ const baseStyle = {
     alignItems: "center",
     justifyContent: "center",
     color: "white",
-    fontFamily: "sans-serif",
+    fontFamily: "var(--oh-serif)",
     borderRadius: "14px",
     border: "1px solid var(--oh-hud-border)",
     boxShadow: "var(--oh-hud-shadow-soft)",

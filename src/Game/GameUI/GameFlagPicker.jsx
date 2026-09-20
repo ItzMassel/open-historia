@@ -45,7 +45,7 @@ const buttonStyle = {
     borderRadius: 9,
     color: "white",
     cursor: "pointer",
-    fontFamily: "sans-serif",
+    fontFamily: "var(--oh-serif)",
     fontSize: "0.8rem",
     fontWeight: 700,
     padding: "0.55rem 0.75rem",
@@ -56,7 +56,7 @@ const searchInputStyle = {
     border: "1px solid rgba(255,255,255,0.14)",
     borderRadius: 9,
     color: "white",
-    fontFamily: "sans-serif",
+    fontFamily: "var(--oh-serif)",
     fontSize: "0.8rem",
     minWidth: "10rem",
     padding: "0.55rem 0.7rem",
@@ -348,11 +348,11 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
 
     return createPortal(
         <div style={{ position: "fixed", inset: 0, zIndex: 12050, background: "rgba(2,6,23,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-            <div style={{ width: "min(56rem, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", background: "rgba(16,18,24,0.99)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", overflow: "hidden", color: "white", fontFamily: "sans-serif" }}>
+            <div style={{ width: "min(56rem, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", background: "rgba(16,18,24,0.99)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", overflow: "hidden", color: "white", fontFamily: "var(--oh-serif)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", padding: "1rem 1.1rem", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                     {current.imageUrl ? <img src={current.imageUrl} alt="" style={{ width: 46, height: 29, objectFit: "cover", borderRadius: 4, boxShadow: "0 0 0 1px rgba(255,255,255,0.18)" }} /> : <div style={{ width: 46, height: 29, borderRadius: 4, border: "1px solid rgba(255,255,255,0.18)" }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, fontSize: "1rem" }}>Change flag</div>
+                        <div style={{ fontFamily: "var(--oh-display)", fontWeight: 800, fontSize: "1rem" }}>Change flag</div>
                         <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.75rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{polity?.name || polity?.polityKey || polity?.code}</div>
                     </div>
                     <button type="button" onClick={onClose} style={{ ...buttonStyle, padding: "0.35rem 0.55rem", fontSize: "1rem", background: "transparent" }}>✕</button>
