@@ -721,6 +721,9 @@ const readScenarioMeta = (scenarioId) => {
 
   return {
     accentColor: String(raw?.accentColor ?? "").trim() || DEFAULT_SCENARIO_META.accentColor,
+    // Hidden from the library but fully intact on disk — the "I want it out of
+    // the way, not gone" case that delete cannot serve. Mirrors readGameMeta.
+    archived: raw?.archived === true,
     coverImageContentType: readStoredImageContentType(raw?.coverImageContentType),
     countryNameOverrides:
     raw?.countryNameOverrides && typeof raw.countryNameOverrides === "object"
@@ -2075,6 +2078,7 @@ const updateScenario = (
   scenarioId,
   {
     accentColor,
+    archived,
     countryNameOverrides,
     description,
     eyebrow,
@@ -2102,6 +2106,7 @@ const updateScenario = (
   const currentMeta = readScenarioMeta(scenarioId);
   writeScenarioMeta(scenarioId, {
     accentColor: String(accentColor ?? currentMeta.accentColor).trim() || currentMeta.accentColor,
+                    archived: typeof archived === "boolean" ? archived : currentMeta.archived,
                     countryNameOverrides:
                     countryNameOverrides && typeof countryNameOverrides === "object"
                     ? countryNameOverrides
@@ -2115,6 +2120,21 @@ const updateScenario = (
                     name: String(name ?? currentMeta.name).trim() || currentMeta.name,
                     subtitle: String(subtitle ?? currentMeta.subtitle).trim() || currentMeta.subtitle,
   });
+
+  // Archiving the scenario the New Game picker currently has selected would
+  // leave it pointing at a card that no longer shows in the library. Hand the
+  // selection to the first scenario that is still visible — same reasoning as
+  // updateGame's activeGameId handoff, just without a live session at stake.
+  if (archived === true && !currentMeta.archived) {
+    const manifest = getScenarioManifest();
+    if (manifest.selectedScenarioId === scenarioId) {
+      const fallback = resolveOrderedIds(manifest.order, SCENARIOS_DIR, DEFAULT_SCENARIO_ID)
+        .filter((id) => id !== scenarioId && fs.existsSync(getScenarioMetaPath(id)))
+        .map((id) => readScenarioMeta(id))
+        .find((meta) => !meta.archived);
+      if (fallback) saveScenarioManifest({ ...manifest, selectedScenarioId: fallback.id });
+    }
+  }
 
   // The world this update's country references resolve against: the one being
   // written in the same call if there is one, else what is already on disk. It is

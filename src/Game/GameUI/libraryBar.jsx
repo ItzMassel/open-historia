@@ -440,12 +440,13 @@ const PromptSectionEditor = ({
   );
 };
 
-const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, selected, updateAvailable }) => {
+const ScenarioCard = ({ onArchive, onClone, onEdit, onPlay, onRemove, onSelect, onUpdate, scenario, selected, updateAvailable }) => {
   const isBuiltIn = scenario.id === "default";
   const assetBadges = Object.entries(scenarioBadgeLabels)
     .filter(([key]) => scenario.assetStatus?.[key])
     .map(([, label]) => label.replace(" PMTiles", "").replace(" JSON", ""));
   const cardImageUrl = scenario.coverImageUrl || DEFAULT_SCENARIO_COVER;
+  const [cardMenuOpen, setCardMenuOpen] = useState(false);
 
   return (
     <div
@@ -533,9 +534,72 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
                 </span>
               )}
             </div>
-            <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.74rem" }}>
-              {scenario.gameCount} game{scenario.gameCount === 1 ? "" : "s"}
-            </span>
+            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem" }}>
+              <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.74rem" }}>
+                {scenario.gameCount} game{scenario.gameCount === 1 ? "" : "s"}
+              </span>
+              <div style={{ position: "relative" }}>
+                <button
+                  aria-haspopup="menu"
+                  aria-expanded={cardMenuOpen}
+                  aria-label={`More for ${scenario.name}`}
+                  onClick={() => setCardMenuOpen((open) => !open)}
+                  style={{
+                    ...actionButtonStyle,
+                    background: cardMenuOpen ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.35)",
+                    fontSize: "1.05rem",
+                    lineHeight: 1,
+                    minWidth: "2rem",
+                    padding: "0.3rem 0.45rem",
+                  }}
+                  type="button"
+                >
+                  ⋮
+                </button>
+                {cardMenuOpen && (
+                  <>
+                    <div
+                      onClick={() => setCardMenuOpen(false)}
+                      style={{ inset: 0, position: "fixed", zIndex: 1 }}
+                    />
+                    <div
+                      role="menu"
+                      style={{
+                        ...surfaceStyle,
+                        borderRadius: 12,
+                        display: "flex",
+                        flexDirection: "column",
+                        minWidth: "11rem",
+                        overflow: "hidden",
+                        position: "absolute",
+                        right: 0,
+                        top: "calc(100% + 0.35rem)",
+                        zIndex: 2,
+                      }}
+                    >
+                      <button
+                        onClick={() => { setCardMenuOpen(false); onClone(scenario); }}
+                        role="menuitem"
+                        style={{ ...actionButtonStyle, background: "transparent", border: "none", borderRadius: 0, justifyContent: "flex-start", padding: "0.55rem 0.8rem", textAlign: "left" }}
+                        type="button"
+                      >
+                        Clone
+                      </button>
+                      {scenario.canDelete && (
+                        <button
+                          onClick={() => { setCardMenuOpen(false); onRemove(scenario); }}
+                          role="menuitem"
+                          style={{ ...actionButtonStyle, background: "transparent", border: "none", borderRadius: 0, color: "#fecaca", justifyContent: "flex-start", padding: "0.55rem 0.8rem", textAlign: "left" }}
+                          type="button"
+                        >
+                          Remove entirely
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
           <div style={{ marginTop: "4rem" }}>
             <div
@@ -590,8 +654,13 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
             <button onClick={() => onEdit(scenario.id)} style={{ ...actionButtonStyle, flex: 1 }} type="button">
               Edit
             </button>
-            <button onClick={() => onClone(scenario)} style={{ ...actionButtonStyle, flexBasis: "100%" }} type="button">
-              Clone Scenario
+            <button
+              onClick={() => onArchive(scenario)}
+              style={{ ...actionButtonStyle, flexBasis: "100%" }}
+              title={scenario.archived ? "Move back into your scenario shelves" : "Hide from the library without deleting"}
+              type="button"
+            >
+              {scenario.archived ? "Unarchive" : "Archive"}
             </button>
           </div>
         </div>
@@ -1676,6 +1745,38 @@ const LibraryTopBar = () => {
     }
   };
 
+  const handleScenarioArchive = async (scenario) => {
+    setEditorError(null);
+    try {
+      await saveScenario(scenario.id, { archived: !scenario.archived });
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    }
+  };
+
+  // Card-level Remove, for a scenario the player wants gone without opening the
+  // full editor first — the same removeScenario the editor's Delete button uses,
+  // which already refuses a scenario any game still points at.
+  const handleScenarioRemove = async (scenario) => {
+    if (!scenario.canDelete) {
+      return;
+    }
+
+    if (!window.confirm(`Remove "${scenario.name}" entirely? This cannot be undone.`)) {
+      return;
+    }
+
+    setEditorError(null);
+    try {
+      await removeScenario(scenario.id);
+      if (editorKind === "scenario" && editorDetails?.scenario?.id === scenario.id) {
+        resetEditor();
+      }
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    }
+  };
+
   const handleGameActivate = async (gameId) => {
     // A game whose scenario is not in this library has no map to open on — the
     // ordinary state of a game imported from someone else. Offer to go and get
@@ -2407,23 +2508,32 @@ const LibraryTopBar = () => {
     () => [...visibleGames].sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0) || (b.round ?? 0) - (a.round ?? 0)),
     [visibleGames],
   );
-  const mostPlayedScenarios = useMemo(
-    () => [...scenarios].sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0) || (b.gameCount ?? 0) - (a.gameCount ?? 0)),
+  // Archived scenarios stay in the catalog (games that use them keep working)
+  // but leave the normal shelves — same reasoning as visibleGames/archivedGames.
+  const visibleScenarios = useMemo(() => scenarios.filter((scenario) => !scenario.archived), [scenarios]);
+  const archivedScenarios = useMemo(
+    () => scenarios
+      .filter((scenario) => scenario.archived)
+      .sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""))),
     [scenarios],
   );
+  const mostPlayedScenarios = useMemo(
+    () => [...visibleScenarios].sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0) || (b.gameCount ?? 0) - (a.gameCount ?? 0)),
+    [visibleScenarios],
+  );
   const lastUpdatedScenarios = useMemo(
-    () => [...scenarios].sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""))),
-    [scenarios],
+    () => [...visibleScenarios].sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""))),
+    [visibleScenarios],
   );
   // "Your Scenarios": ones the player made or edited themselves. hubOrigin is
   // null for locally created scenarios AND for hub imports edited locally (any
   // local meta write clears it — see writeScenarioMeta). The stock built-in
   // only counts once it has actually been touched.
   const yourScenarios = useMemo(
-    () => scenarios.filter(
+    () => visibleScenarios.filter(
       (scenario) => !scenario.hubOrigin && (scenario.id !== "default" || scenario.updatedAt !== scenario.createdAt),
     ),
-    [scenarios],
+    [visibleScenarios],
   );
 
   return (
@@ -2944,9 +3054,11 @@ const LibraryTopBar = () => {
                   {mostPlayedScenarios.map((scenario) => (
                     <ScenarioCard
                       key={scenario.id}
+                      onArchive={handleScenarioArchive}
                       onClone={handleScenarioClone}
                       onEdit={openScenarioEditor}
                       onPlay={handleScenarioPlay}
+                      onRemove={handleScenarioRemove}
                       onSelect={selectScenario}
                       onUpdate={handleScenarioUpdate}
                       scenario={scenario}
@@ -2959,9 +3071,11 @@ const LibraryTopBar = () => {
                   {lastUpdatedScenarios.map((scenario) => (
                     <ScenarioCard
                       key={scenario.id}
+                      onArchive={handleScenarioArchive}
                       onClone={handleScenarioClone}
                       onEdit={openScenarioEditor}
                       onPlay={handleScenarioPlay}
+                      onRemove={handleScenarioRemove}
                       onSelect={selectScenario}
                       onUpdate={handleScenarioUpdate}
                       scenario={scenario}
@@ -2975,9 +3089,11 @@ const LibraryTopBar = () => {
                   {yourScenarios.map((scenario) => (
                     <ScenarioCard
                       key={scenario.id}
+                      onArchive={handleScenarioArchive}
                       onClone={handleScenarioClone}
                       onEdit={openScenarioEditor}
                       onPlay={handleScenarioPlay}
+                      onRemove={handleScenarioRemove}
                       onSelect={selectScenario}
                       onUpdate={handleScenarioUpdate}
                       scenario={scenario}
@@ -2986,6 +3102,25 @@ const LibraryTopBar = () => {
                     />
                   ))}
                 </MenuRow>
+                {archivedScenarios.length > 0 && (
+                  <MenuRow title={`🗄️ Archived (${archivedScenarios.length})`}>
+                    {archivedScenarios.map((scenario) => (
+                      <ScenarioCard
+                        key={scenario.id}
+                        onArchive={handleScenarioArchive}
+                        onClone={handleScenarioClone}
+                        onEdit={openScenarioEditor}
+                        onPlay={handleScenarioPlay}
+                        onRemove={handleScenarioRemove}
+                        onSelect={selectScenario}
+                        onUpdate={handleScenarioUpdate}
+                        scenario={scenario}
+                        selected={scenario.id === selectedScenarioId}
+                        updateAvailable={scenarioUpdateAvailable(scenario)}
+                      />
+                    ))}
+                  </MenuRow>
+                )}
               </>
             )}
           </div>
