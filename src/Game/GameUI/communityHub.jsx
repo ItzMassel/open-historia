@@ -600,15 +600,12 @@ const COUNT_UP_MS = 800;
 
 // resetKey (the post's id) is only there so switching to a DIFFERENT post
 // with the same install count still replays the animation, not just when
-// the number itself changes. `armed` gates the actual start — see
-// useRevealOnce below: on a tall page the count can be off-screen on
-// mount, and running the animation there means the user only ever sees it
-// land on the final number once they scroll down to it.
-const useCountUp = (target, resetKey, armed, duration = COUNT_UP_MS) => {
+// the number itself changes.
+const useCountUp = (target, resetKey, duration = COUNT_UP_MS) => {
   const [value, setValue] = useState(0);
 
   useEffect(() => {
-    if (target == null || !armed) return undefined;
+    if (target == null) return undefined;
     let frame;
     const startedAt = performance.now();
     const tick = (now) => {
@@ -621,49 +618,15 @@ const useCountUp = (target, resetKey, armed, duration = COUNT_UP_MS) => {
     // so it repaints the count back to ~0 on its own — no separate reset.
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [target, resetKey, armed, duration]);
+  }, [target, resetKey, duration]);
 
   return value;
-};
-
-// True once the given element has scrolled into view at least once, reset
-// whenever resetKey changes (a fresh post to watch for). Used to hold the
-// import count at 0 — instead of animating unseen — until it's actually on
-// screen, whether that's immediately on a short page or after scrolling on
-// a tall one.
-const useRevealOnce = (resetKey) => {
-  const ref = useRef(null);
-  const [revealed, setRevealed] = useState(false);
-
-  useEffect(() => {
-    setRevealed(false);
-    const el = ref.current;
-    if (!el) return undefined;
-    if (typeof IntersectionObserver === "undefined") {
-      setRevealed(true);
-      return undefined;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setRevealed(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.4 },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [resetKey]);
-
-  return [ref, revealed];
 };
 
 const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundle }) => {
   const isMobile = useIsMobile();
   const cover = post.coverImageUrl || DEFAULT_SCENARIO_COVER;
-  const [countRef, countRevealed] = useRevealOnce(post.id);
-  const animatedInstalls = useCountUp(post.installs, post.id, countRevealed);
+  const animatedInstalls = useCountUp(post.installs, post.id);
 
   const importButton = (
     <button
@@ -751,7 +714,7 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundl
         </div>
 
         {post.installs != null && (
-          <div ref={countRef} style={{ marginTop: "clamp(1.6rem, 5vw, 3.2rem)" }}>
+          <div style={{ marginTop: "clamp(1.6rem, 5vw, 3.2rem)" }}>
             <div style={{ fontSize: "clamp(2.6rem, 9vw, 5rem)", fontWeight: 700, lineHeight: 1 }}>{animatedInstalls}</div>
             <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "clamp(1rem, 2.5vw, 1.35rem)", marginTop: "0.3rem" }}>imports</div>
           </div>
