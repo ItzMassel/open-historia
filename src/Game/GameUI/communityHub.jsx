@@ -592,41 +592,9 @@ const heroPillButton = {
 // than centering either independently (which would misalign them).
 const DETAIL_SIDE_WIDTH = "80%";
 
-// The big import count "spins up" from 0 to its real value on every visit —
-// fast and front-loaded (ease-out), like an odometer, not a slow linear
-// crawl. Re-plays whenever the viewed post (or its count) changes, so
-// switching scenarios or a hard reload both trigger it fresh.
-const COUNT_UP_MS = 800;
-
-// resetKey (the post's id) is only there so switching to a DIFFERENT post
-// with the same install count still replays the animation, not just when
-// the number itself changes.
-const useCountUp = (target, resetKey, duration = COUNT_UP_MS) => {
-  const [value, setValue] = useState(0);
-
-  useEffect(() => {
-    if (target == null) return undefined;
-    let frame;
-    const startedAt = performance.now();
-    const tick = (now) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      const eased = 1 - (1 - progress) ** 3;
-      setValue(Math.round(target * eased));
-      if (progress < 1) frame = requestAnimationFrame(tick);
-    };
-    // The first animation frame already lands at (or just past) 0% progress,
-    // so it repaints the count back to ~0 on its own — no separate reset.
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [target, resetKey, duration]);
-
-  return value;
-};
-
 const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundle }) => {
   const isMobile = useIsMobile();
   const cover = post.coverImageUrl || DEFAULT_SCENARIO_COVER;
-  const animatedInstalls = useCountUp(post.installs, post.id);
 
   const importButton = (
     <button
@@ -715,7 +683,7 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundl
 
         {post.installs != null && (
           <div style={{ marginTop: "clamp(1.6rem, 5vw, 3.2rem)" }}>
-            <div style={{ fontSize: "clamp(2.6rem, 9vw, 5rem)", fontWeight: 700, lineHeight: 1 }}>{animatedInstalls}</div>
+            <div style={{ fontSize: "clamp(2.6rem, 9vw, 5rem)", fontWeight: 700, lineHeight: 1 }}>{post.installs}</div>
             <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "clamp(1rem, 2.5vw, 1.35rem)", marginTop: "0.3rem" }}>imports</div>
           </div>
         )}
