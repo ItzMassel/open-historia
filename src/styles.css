@@ -23,6 +23,18 @@ body {
   --oh-display: 'Cinzel', Georgia, 'Times New Roman', serif;
 }
 
+/* Form controls don't inherit font-family from the page by default in any
+   browser — they use the OS/UI font (Arial on most Windows setups) unless
+   told otherwise. Without this, every <button>, <input>, <select> and
+   <textarea> that doesn't set its own fontFamily inline falls back to Arial
+   even though the rest of the page reads EB Garamond. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 /* -------------------------------------------------------------------------
    HUD glass surface tokens (ported from kernely's Continuum branch). Every
    fixed HUD surface — the menu button and game menu, the bottom toolbar, the
