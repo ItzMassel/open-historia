@@ -1014,6 +1014,61 @@ const buildCountryLabelCollections = async (tileData, ownedCodes = null) => {
   };
 };
 
+// One label point per real country — same identification (resolveCountryDisplayName
+// + translateLabel), same equal-area-biased centroid (getCentroid over the
+// country's largest ring) and the same area measure buildCountryLabelCollections
+// uses for the live map, but always a single point: no curved/warped glyph path.
+// For a small static preview (the community hub's scenario thumbnail) that
+// MapLibre-style per-letter placement is unnecessary work a plain canvas can't
+// even render — this is the same underlying data, simplified to one anchor.
+export const loadCountryLabelPoints = async (ownedCodes = null) => {
+  const tileData = await getCountriesTileData();
+  if (!tileData?.data) return [];
+
+  const tile = await decodeVectorTile(tileData.data);
+  const layer = tile.layers.countries;
+  if (!layer) return [];
+
+  const extent = layer.extent || 4096;
+  const filterByOwners = ownedCodes instanceof Set && ownedCodes.size > 0;
+  const registry = new Map();
+
+  for (let index = 0; index < layer.length; index += 1) {
+    const feature = layer.feature(index);
+    const props = feature.properties;
+    const code = props?.GID_0 || props?.gid_0 || props?.ISO_A3 || props?.iso_a3 || "";
+    if (filterByOwners && !ownedCodes.has(code)) continue;
+    const name = translateLabel(resolveCountryDisplayName(
+      props?.Country || props?.NAME || props?.name || props?.COUNTRY,
+      code,
+    ));
+    if (!name) continue;
+
+    const geometry = feature.loadGeometry();
+    let bestRingTile = null;
+    let bestAreaTile = -1;
+    for (const ring of geometry) {
+      const ringPoints = ring.map((point) => [point.x, point.y]);
+      const area = calculateArea(ringPoints);
+      if (area > bestAreaTile) {
+        bestAreaTile = area;
+        bestRingTile = ringPoints;
+      }
+    }
+    if (!bestRingTile) continue;
+
+    const areaLngLat = calculateArea(ringToLngLat(bestRingTile, extent));
+    const existing = registry.get(name);
+    if (existing && existing.areaLngLat >= areaLngLat) continue;
+
+    const { cx, cy } = getCentroid(bestRingTile);
+    const [lng, lat] = tileToLngLat(cx, cy, extent);
+    registry.set(name, { name, lng, lat, areaLngLat });
+  }
+
+  return [...registry.values()];
+};
+
 // Map vNext label policy is intentionally centralized here. Geometry, sizing,
 // visibility and diagnostics all consume the SAME decision so we cannot fix one
 // layer and accidentally leave another with stale thresholds.

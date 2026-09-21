@@ -9,7 +9,7 @@
 // server's /api/hub proxy. Publishing exports the chosen scenario locally and
 // opens a prefilled hub post where the author drags the bundle in.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   exportScenarioBundle,
   importScenarioBundle,
@@ -26,6 +26,7 @@ import {
 import { unzipBundle, zipBundle } from "../../runtime/bundleZip.js";
 import { sha256Hex } from "../../runtime/basemapLibrary.js";
 import { listFlags } from "../../runtime/flagLibrary.js";
+import ScenarioMapPreview, { PREVIEW_ASPECT_RATIO, PREVIEW_FRAME_STYLE } from "./ScenarioMapPreview.jsx";
 
 // The one and only hub. Not configurable by design.
 const HUB_OWNER = "Open-Historia";
@@ -418,6 +419,8 @@ const ScenarioRow = ({ title, posts, busyId, onImport, onSelect, emptyText, layo
   </div>
 );
 
+const detailStat = { color: "rgba(255,255,255,0.75)", fontSize: "0.85rem" };
+
 // Shared by the grid view and ScenarioDetail so the two can't drift out of
 // sync in style/wording — each rendered its own copy of this before.
 const StatusBanner = ({ notice, error }) => (
@@ -435,179 +438,183 @@ const StatusBanner = ({ notice, error }) => (
   </>
 );
 
-// The detail view's round icon-stack buttons (👍 like / 💬 comment) — an icon
-// bubble with its count underneath, both wrapped in one link so the whole
-// stack is the tap target. Both open the hub post, same as the two big
-// buttons below — likes/comments always live on GitHub, never in-app.
-const HeroIconStat = ({ href, title, icon, alt, count }) => (
-  <a
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    title={title}
-    style={{ alignItems: "center", color: "#fff", display: "flex", flexDirection: "column", gap: "0.5rem", textDecoration: "none" }}
-  >
-    <span
-      style={{
-        alignItems: "center",
-        background: "rgba(255,255,255,0.07)",
-        border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: "50%",
-        display: "flex",
-        height: "clamp(3.2rem, 8vw, 4.1rem)",
-        justifyContent: "center",
-        width: "clamp(3.2rem, 8vw, 4.1rem)",
-      }}
-    >
-      <img src={icon} alt={alt} style={{ filter: "invert(1)", height: "40%", width: "40%" }} />
-    </span>
-    <span style={{ fontSize: "clamp(0.85rem, 2vw, 1.1rem)", fontWeight: 600 }}>{count}</span>
-  </a>
-);
+// The scenario's actual region geometry + ownership, pulled out of the hub
+// bundle for ScenarioMapPreview. Bundles ship no geometry for a re-ownership
+// scenario (Fallout, WWII…) — ScenarioMapPreview falls back to the stock world
+// repainted with regionOwnershipOverrides, same as the in-game country picker.
+const extractPreviewGeometry = (bundle) => ({
+  regionsGeojson: bundle?.assets?.regionsGeojson?.mode === "embedded"
+    ? bundle.assets.regionsGeojson.data
+    : null,
+  ownerOverrides: bundle?.data?.world?.regionOwnershipOverrides ?? null,
+  // The scenario's polity registry and palette. Without these an artificial
+  // scenario renders as the real world wearing procedural colours: a renamed
+  // polity splits in two (its token AND its display name both owning ground),
+  // and authored colours are ignored.
+  polityOverrides: bundle?.data?.world?.polityOverrides ?? null,
+  colors: bundle?.assets?.colors?.mode === "embedded" ? bundle.assets.colors.data : null,
+});
 
-const heroPillButton = {
-  alignItems: "center",
-  borderRadius: "999px",
-  cursor: "pointer",
-  display: "flex",
-  fontSize: "clamp(1rem, 2.6vw, 1.35rem)",
-  fontWeight: 600,
-  justifyContent: "center",
-  padding: "clamp(0.9rem, 3vw, 1.15rem) clamp(1.6rem, 5vw, 2.6rem)",
-  textDecoration: "none",
-};
+// The community hub's own bundle fetch (network + the server's /api/hub/file
+// proxy) is a separate hop from ScenarioMapPreview's internal stock-geometry
+// fetch, and can hang or fail on its own — this bounds it so "World map" never
+// sits over a skeleton forever.
+const HUB_BUNDLE_PREVIEW_TIMEOUT_MS = 15000;
 
-// A community post's world map "preview" is really just its assigned cover
-// image, shown twice: once dimmed as the header banner, once crisp and
-// framed lower down, the way a game store page reuses its key art. There is
-// no separate live-map render here — only the one image the post carries.
-const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => {
-  const cover = post.coverImageUrl || DEFAULT_SCENARIO_COVER;
+const withPreviewTimeout = (promise, ms) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), ms)),
+]);
+
+// A cheap, static rendering of the post's actual scenario map — the whole
+// world, zoomed out, with country names, like the game's own overview — sits
+// at the bottom of the detail view below the description/Import row. Shows a
+// skeleton immediately (so it's visibly loading, not just an empty heading)
+// while the scenario's bundle downloads, and a explicit failure message
+// instead of hanging if that download errors or takes too long.
+const ScenarioMapPreviewSection = ({ post, loadBundle }) => {
+  // "loading" | "ready" | "error"
+  const [status, setStatus] = useState("loading");
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setPreview(null);
+    withPreviewTimeout(loadBundle(post), HUB_BUNDLE_PREVIEW_TIMEOUT_MS)
+      .then((bundle) => {
+        if (cancelled) return;
+        setPreview(extractPreviewGeometry(bundle));
+        setStatus("ready");
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        console.error("Scenario map preview: failed to download the scenario bundle:", loadError);
+        setStatus("error");
+      });
+    return () => { cancelled = true; };
+  }, [post, loadBundle]);
+
   return (
-    <div style={{ color: "#fff" }}>
-      <button
-        type="button"
-        onClick={onBack}
-        style={{ ...pillButton, marginBottom: "0.9rem" }}
-      >
-        ← Back
-      </button>
-
-      <StatusBanner notice={notice} error={error} />
-
-      <div style={{ borderRadius: "20px", marginBottom: "clamp(1.5rem, 4vw, 2.5rem)", overflow: "hidden", position: "relative" }}>
-        <div
-          style={{
-            aspectRatio: "1280 / 370",
-            backgroundImage: `linear-gradient(to bottom, rgba(15,15,17,0) 45%, rgba(15,15,17,0.85) 85%, rgba(15,15,17,1) 100%), url(${cover})`,
-            backgroundPosition: "center",
-            backgroundSize: "cover",
-            width: "100%",
-          }}
-        />
-        <img
-          alt=""
-          aria-hidden="true"
-          src="/logo.png"
-          style={{
-            bottom: "-8%",
-            height: "22%",
-            left: "50%",
-            opacity: 0.55,
-            position: "absolute",
-            transform: "translateX(-50%)",
-          }}
-        />
+    <div style={{ marginTop: "1.3rem" }}>
+      <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        World map
       </div>
-
-      <div style={{ margin: "0 auto", maxWidth: "40rem", textAlign: "center" }}>
-        <h2 style={{ fontSize: "clamp(1.8rem, 5vw, 3rem)", fontWeight: 700, letterSpacing: "-0.01em", margin: 0 }}>
-          {post.pinned ? "📌 " : ""}{post.title}
-        </h2>
-        <div style={{ alignItems: "center", color: "rgba(230,230,230,0.85)", display: "flex", fontSize: "clamp(0.85rem, 2vw, 1rem)", gap: "0.5rem", justifyContent: "center", marginTop: "0.5rem" }}>
-          {post.avatarUrl && (
-            <img src={post.avatarUrl} alt="" style={{ borderRadius: "50%", height: "1.2rem", width: "1.2rem" }} />
-          )}
-          by {post.author} · {new Date(post.createdAt).toLocaleDateString()}
-        </div>
-
-        {post.installs != null && (
-          <div style={{ marginTop: "clamp(1.6rem, 5vw, 3.2rem)" }}>
-            <div style={{ fontSize: "clamp(2.6rem, 9vw, 5rem)", fontWeight: 700, lineHeight: 1 }}>{post.installs}</div>
-            <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "clamp(1rem, 2.5vw, 1.35rem)", marginTop: "0.3rem" }}>imports</div>
-          </div>
-        )}
-
-        <div
-          style={{
-            alignItems: "center",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "clamp(1rem, 4vw, 2.8rem)",
-            justifyContent: "center",
-            marginTop: "clamp(1.6rem, 5vw, 2.8rem)",
-          }}
-        >
-          <HeroIconStat href={post.url} title="Like this scenario on its GitHub post" icon="/thumbs-up.png" alt="Like" count={post.upvotes} />
-
-          <button
-            type="button"
-            disabled={!post.bundleUrl || busy}
-            onClick={() => onImport(post)}
-            title={post.bundleUrl ? "Import into your Scenarios" : "This post has no scenario file attached"}
+      {status === "ready" ? (
+        <ScenarioMapPreview
+          regionsGeojson={preview.regionsGeojson}
+          ownerOverrides={preview.ownerOverrides}
+          polityOverrides={preview.polityOverrides}
+          colors={preview.colors}
+        />
+      ) : (
+        <div style={PREVIEW_FRAME_STYLE}>
+          <div
             style={{
-              ...heroPillButton,
-              background: post.bundleUrl ? "rgba(124,58,237,0.85)" : "rgba(255,255,255,0.08)",
-              border: "none",
-              color: post.bundleUrl ? "#fff" : "rgba(255,255,255,0.35)",
-              cursor: post.bundleUrl && !busy ? "pointer" : "default",
+              alignItems: "center",
+              aspectRatio: PREVIEW_ASPECT_RATIO,
+              background: "#16161a",
+              borderRadius: "10px",
+              color: "rgba(255,255,255,0.4)",
+              display: "flex",
+              fontSize: "0.78rem",
+              justifyContent: "center",
+              overflow: "hidden",
+              position: "relative",
+              textAlign: "center",
+              width: "100%",
             }}
           >
-            {busy ? "Importing…" : "Import"}
-          </button>
-
-          <a
-            href={post.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Scenarios are saved on GitHub — open the post to view, like or comment."
-            style={{ ...heroPillButton, background: "#1e1e20", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-          >
-            Visit Github
-          </a>
-
-          <HeroIconStat href={post.url} title="Comment on this scenario's GitHub post" icon="/comment.png" alt="Comment" count={post.comments} />
+            {status === "loading" ? (
+              <>
+                <style>{"@keyframes scenarioMapPreviewSectionShimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }"}</style>
+                <div
+                  style={{
+                    animation: "scenarioMapPreviewSectionShimmer 1.4s ease-in-out infinite",
+                    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)",
+                    inset: 0,
+                    position: "absolute",
+                  }}
+                />
+              </>
+            ) : (
+              "No map preview available."
+            )}
+          </div>
         </div>
-
-        {post.description && (
-          <p style={{ color: "rgba(244,244,246,0.8)", fontSize: "clamp(0.9rem, 2.2vw, 1.05rem)", lineHeight: 1.6, marginTop: "clamp(1.6rem, 5vw, 2.8rem)" }}>
-            {post.description}
-          </p>
-        )}
-      </div>
-
-      <figure style={{ margin: "clamp(1.6rem, 5vw, 2.8rem) 0 0" }}>
-        <div
-          style={{
-            aspectRatio: "1.95",
-            background: "#16161a",
-            border: "1px solid rgba(255,255,255,0.14)",
-            borderRadius: "14px",
-            overflow: "hidden",
-            width: "100%",
-          }}
-        >
-          <img
-            src={cover}
-            alt={`${post.title} world map preview`}
-            onError={handleScenarioCoverError}
-            style={{ display: "block", height: "100%", objectFit: "cover", width: "100%" }}
-          />
-        </div>
-      </figure>
+      )}
     </div>
   );
 };
+
+const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundle }) => (
+  <div style={{ color: "#fff" }}>
+    <button
+      type="button"
+      onClick={onBack}
+      style={{ ...pillButton, marginBottom: "0.9rem" }}
+    >
+      ← Back
+    </button>
+
+    <StatusBanner notice={notice} error={error} />
+
+    <ScenarioCover post={post} borderRadius="14px" marginBottom="0.9rem" />
+
+    <div style={{ alignItems: "center", display: "flex", gap: "0.6rem", marginBottom: "0.3rem" }}>
+      {post.avatarUrl && (
+        <img src={post.avatarUrl} alt={post.author} style={{ borderRadius: "50%", height: "1.8rem", width: "1.8rem" }} />
+      )}
+      <h3 style={{ fontSize: "1.3rem", fontWeight: 800, margin: 0 }}>
+        {post.pinned ? "📌 " : ""}{post.title}
+      </h3>
+    </div>
+    <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.8rem", marginBottom: "0.9rem" }}>
+      by {post.author} · {new Date(post.createdAt).toLocaleDateString()}
+    </div>
+
+    <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "1.1rem", marginBottom: "0.55rem" }}>
+      {post.installs != null && <span style={detailStat}>⬇ {post.installs} imported</span>}
+      <a href={post.url} target="_blank" rel="noopener noreferrer" title="Like this scenario on its GitHub post" style={{ ...detailStat, textDecoration: "none" }}>👍 {post.upvotes} liked</a>
+      <a href={post.url} target="_blank" rel="noopener noreferrer" title="Comment on its GitHub post" style={{ ...detailStat, textDecoration: "none" }}>💬 {post.comments} comments</a>
+    </div>
+    <div style={{ color: "rgba(196,181,253,0.9)", fontSize: "0.78rem", marginBottom: "1rem" }}>
+      Likes and comments live on the scenario's GitHub post — tap 👍 or 💬 above (or the button below) to open it and react there.
+    </div>
+
+    <p style={{ color: "rgba(244,244,246,0.8)", fontSize: "0.9rem", lineHeight: 1.6, marginBottom: "1.3rem" }}>
+      {post.description || "No description."}
+    </p>
+
+    <div style={{ display: "flex", gap: "0.6rem" }}>
+      <button
+        type="button"
+        disabled={!post.bundleUrl || busy}
+        onClick={() => onImport(post)}
+        style={{
+          alignItems: "center",
+          background: post.bundleUrl ? "rgba(124,58,237,0.85)" : "rgba(255,255,255,0.08)",
+          border: "none",
+          borderRadius: "10px",
+          color: post.bundleUrl ? "#fff" : "rgba(255,255,255,0.35)",
+          cursor: post.bundleUrl && !busy ? "pointer" : "default",
+          display: "flex",
+          fontSize: "1rem",
+          fontWeight: 700,
+          justifyContent: "center",
+          padding: "0.8rem 1.6rem",
+        }}
+      >
+        {busy ? "Importing…" : "▶ Import & Play"}
+      </button>
+      <a href={post.url} target="_blank" rel="noopener noreferrer" style={{ ...pillButton, textDecoration: "none" }}>
+        👍 Like / 💬 Comment ↗
+      </a>
+    </div>
+
+    <ScenarioMapPreviewSection post={post} loadBundle={loadBundle} />
+  </div>
+);
 
 const CommunityPanel = ({ fullPage = false, onImported }) => {
   const { scenarios } = useLibraryState();
@@ -630,6 +637,22 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
   useEffect(() => {
     selectedPostRef.current = selectedPost;
   }, [selectedPost]);
+
+  // Opening a post's detail view downloads its bundle to draw the map preview
+  // — the same download Import needs — so the result is cached here and reused
+  // if the user then hits Import, instead of fetching the bundle twice.
+  const bundleCacheRef = useRef(new Map());
+  // Stable identity (bundleCacheRef never changes) so the detail view's preview
+  // effect doesn't refire — and refetch nothing, but still flicker — on every
+  // unrelated re-render (banners, busyId…) of this panel.
+  const loadHubBundle = useCallback((post) => {
+    const cached = bundleCacheRef.current.get(post.id);
+    if (cached) return cached;
+    const promise = downloadHubBundle(post.bundleUrl);
+    bundleCacheRef.current.set(post.id, promise);
+    promise.catch(() => bundleCacheRef.current.delete(post.id)); // don't cache a failure
+    return promise;
+  }, []);
 
   const clearBanners = () => {
     setNotice(null);
@@ -730,7 +753,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
     setBusyId(post.id);
     clearBanners();
     try {
-      const bundle = await downloadHubBundle(post.bundleUrl);
+      const bundle = await loadHubBundle(post);
       // Provenance: which post and which exact bundle file this copy came from.
       // The library's Scenarios tab compares this against the post's CURRENT
       // bundle URL to offer an Update button — and drops it the moment the
@@ -859,6 +882,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
           onBack={backToGrid}
           notice={notice}
           error={error}
+          loadBundle={loadHubBundle}
         />
       ) : (
         <>
