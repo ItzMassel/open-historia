@@ -456,7 +456,7 @@ const extractPreviewGeometry = (bundle) => ({
 
 // The community hub's own bundle fetch (network + the server's /api/hub/file
 // proxy) is a separate hop from ScenarioMapPreview's internal stock-geometry
-// fetch, and can hang or fail on its own — this bounds it so "World map" never
+// fetch, and can hang or fail on its own — this bounds it so the preview never
 // sits over a skeleton forever.
 const HUB_BUNDLE_PREVIEW_TIMEOUT_MS = 15000;
 
@@ -495,10 +495,7 @@ const ScenarioMapPreviewSection = ({ post, loadBundle }) => {
   }, [post, loadBundle]);
 
   return (
-    <div style={{ marginTop: "1.3rem" }}>
-      <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        World map
-      </div>
+    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", marginTop: "1.3rem" }}>
       {status === "ready" ? (
         <ScenarioMapPreview
           regionsGeojson={preview.regionsGeojson}
@@ -709,15 +706,15 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error, loadBundl
           {commentStat}
         </div>
       ) : (
-        // Desktop: like/comment pinned to the same 80%-wide box the map
-        // preview frame below uses, so their outer edges line up with it —
+        // Desktop: like/comment pinned to the same 80%-wide, centered box the
+        // map preview frame below uses, so their outer edges line up with it —
         // Import/Visit Github stay as a centered pair in between.
         <div
           style={{
             alignItems: "center",
             display: "flex",
             justifyContent: "space-between",
-            marginTop: "clamp(1.6rem, 5vw, 2.8rem)",
+            margin: "clamp(1.6rem, 5vw, 2.8rem) auto 0",
             width: DETAIL_SIDE_WIDTH,
           }}
         >
